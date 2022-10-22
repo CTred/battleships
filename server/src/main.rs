@@ -6,7 +6,7 @@ use renet::{
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant, SystemTime};
 
-use store::EndGameReason;
+use store::{EndGameReason, Player};
 
 // Only clients that can provide the same PROTOCOL_ID that the server is using will be able to connect.
 // This can be used to make sure players use the most recent version of the client for instance.
@@ -26,7 +26,7 @@ fn main() {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap(),
         ServerConfig {
-            max_clients: 2,
+            max_clients: 10,
             protocol_id: PROTOCOL_ID,
             public_addr: server_addr,
             authentication: ServerAuthentication::Unsecure,
@@ -55,7 +55,7 @@ fn main() {
                     for (player_id, player) in game_state.players.iter() {
                         let event = store::GameEvent::PlayerJoined {
                             player_id: *player_id,
-                            name: player.name.clone(),
+                            player_details: player.clone(),
                         };
                         server.send_message(id, 0, bincode::serialize(&event).unwrap());
                     }
@@ -63,7 +63,7 @@ fn main() {
                     // Add the new player to the game
                     let event = store::GameEvent::PlayerJoined {
                         player_id: id,
-                        name: name_from_user_data(&user_data),
+                        player_details: name_from_user_data(&user_data),
                     };
                     game_state.consume(&event);
 
@@ -72,9 +72,11 @@ fn main() {
 
                     info!("Client {} connected.", id);
 
-                    // In TicTacTussle the game can begin once two players have joined
+                    // Begin game with two players
+                    // TODO: implement "start button in lobby"
+                    // TODO: players may join in the middle of a game
                     if game_state.players.len() == 2 {
-                        let event = store::GameEvent::BeginGame { goes_first: id };
+                        let event = store::GameEvent::BeginGame { first_player: id };
                         game_state.consume(&event);
                         server.broadcast_message(0, bincode::serialize(&event).unwrap());
                         trace!("The game has begun");
@@ -110,12 +112,12 @@ fn main() {
                         server.broadcast_message(0, bincode::serialize(&event).unwrap());
 
                         // Determine if a player has won the game
-                        if let Some(winner) = game_state.determine_winner() {
-                            let event = store::GameEvent::EndGame {
-                                reason: store::EndGameReason::PlayerWon { winner },
-                            };
-                            server.broadcast_message(0, bincode::serialize(&event).unwrap());
-                        }
+                        // if let Some(winner) = game_state.determine_winner() {
+                        //     let event = store::GameEvent::EndGame {
+                        //         reason: store::EndGameReason::PlayerWon { winner },
+                        //     };
+                        //     server.broadcast_message(0, bincode::serialize(&event).unwrap());
+                        // }
                     } else {
                         warn!("Player {} sent invalid event:\n\t{:#?}", client_id, event);
                     }
@@ -128,11 +130,13 @@ fn main() {
     }
 }
 
-fn name_from_user_data(user_data: &[u8; NETCODE_USER_DATA_BYTES]) -> String {
+fn name_from_user_data(user_data: &[u8; NETCODE_USER_DATA_BYTES]) -> Player {
     let mut buffer = [0u8; 8];
     buffer.copy_from_slice(&user_data[0..8]);
     let mut len = u64::from_le_bytes(buffer) as usize;
     len = len.min(NETCODE_USER_DATA_BYTES - 8);
     let data = user_data[8..len + 8].to_vec();
-    String::from_utf8(data).unwrap()
+    Player {
+        name: String::from_utf8(data).unwrap(),
+    }
 }

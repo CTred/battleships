@@ -1,26 +1,53 @@
+pub use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+pub mod camera;
+pub mod map;
 
 /// Struct for storing player related data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Player {
     pub name: String,
-    pub piece: Tile,
 }
 
-/// Possible GameStates for a tile in the board
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum Tile {
-    Empty,
-    Tic,
-    Tac,
+/// An event that progresses the GameState forward
+#[derive(Debug, Clone, Serialize, PartialEq, Deserialize)]
+pub enum GameEvent {
+    BeginGame {
+        first_player: PlayerId,
+    },
+    EndGame {
+        reason: EndGameReason,
+    },
+    PlayerJoined {
+        player_id: PlayerId,
+        player_details: Player,
+    },
+    PlayerDisconnected {
+        player_id: PlayerId,
+    },
+    // PlayerSelects {
+    //     player_id: PlayerId,
+    //     select_box: SelectQuad,
+    // },
+    ShipMove {
+        player_id: PlayerId,
+        at: Vec2,
+    },
+    ShipPlaced {
+        player_id: PlayerId,
+        at: Vec2,
+    },
 }
 
 /// The different states a game can be in. (not to be confused with the entire "GameState")
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum Stage {
+pub enum GameStage {
+    Lobby,
     PreGame,
     InGame,
+    Paused,
     Ended,
 }
 
@@ -30,31 +57,19 @@ type PlayerId = u64;
 /// A GameState object that is able to keep track of a game of TicTacTussle
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
-    pub stage: Stage,
-    pub board: [Tile; 9],
-    pub active_plauer_id: PlayerId,
+    pub stage: GameStage,
     pub players: HashMap<PlayerId, Player>,
     pub history: Vec<GameEvent>,
+    pub cur_player: Option<PlayerId>,
 }
 
 impl Default for GameState {
     fn default() -> Self {
         Self {
-            stage: Stage::PreGame,
-            board: [
-                Tile::Empty,
-                Tile::Empty,
-                Tile::Empty,
-                Tile::Empty,
-                Tile::Empty,
-                Tile::Empty,
-                Tile::Empty,
-                Tile::Empty,
-                Tile::Empty,
-            ],
-            active_plauer_id: 0,
+            stage: GameStage::Lobby,
             players: HashMap::new(),
             history: Vec::new(),
+            cur_player: None,
         }
     }
 }
@@ -64,21 +79,26 @@ impl GameState {
     pub fn validade(&self, event: &GameEvent) -> bool {
         use GameEvent::*;
         match event {
-            BeginGame { goes_first } => {
-                let player_is_unknown = self.players.contains_key(goes_first);
-                if self.stage != Stage::PreGame || player_is_unknown {
+            BeginGame { first_player } => {
+                if None == self.players.get(first_player) {
+                    return false;
+                }
+                if self.players.len() != 2 {
                     return false;
                 }
             }
             EndGame { reason } => match reason {
                 EndGameReason::PlayerWon { winner: _ } => {
-                    if self.stage != Stage::InGame {
+                    if self.stage != GameStage::InGame {
                         return false;
                     }
                 }
                 _ => {}
             },
-            PlayerJoined { player_id, name: _ } => {
+            PlayerJoined {
+                player_id,
+                player_details: _,
+            } => {
                 if self.players.contains_key(player_id) {
                     return false;
                 }
@@ -88,21 +108,9 @@ impl GameState {
                     return false;
                 }
             }
-            PlaceTile { player_id, at } => {
-                if !self.players.contains_key(player_id) {
-                    return false;
-                }
-
-                if self.active_plauer_id != *player_id {
-                    return false;
-                }
-
-                if *at > 8 {
-                    return false;
-                }
-                if self.board[*at] != Tile::Empty {
-                    return false;
-                }
+            ShipMove { player_id, at: _ } => return self.is_player_turn(player_id),
+            ShipPlaced { player_id, at } => {
+                return self.is_player_turn(player_id) & (self.stage == GameStage::PreGame);
             }
         }
         true
@@ -111,83 +119,56 @@ impl GameState {
     pub fn consume(&mut self, valid_event: &GameEvent) {
         use GameEvent::*;
         match valid_event {
-            BeginGame { goes_first } => {
-                self.active_plauer_id = *goes_first;
-                self.stage = Stage::InGame;
+            BeginGame { first_player } => {
+                self.cur_player = Some(*first_player);
+                trace!("First player: {:?}", *first_player);
+                self.stage = GameStage::PreGame;
             }
-            EndGame { reason: _ } => self.stage = Stage::Ended,
-            PlayerJoined { player_id, name } => {
-                self.players.insert(
-                    *player_id,
-                    Player {
-                        name: name.to_string(),
-                        // First player to join gets tac, second gets tic
-                        piece: if self.players.len() > 0 {
-                            Tile::Tac
-                        } else {
-                            Tile::Tic
-                        },
-                    },
-                );
-            }
+            EndGame { reason: _ } => self.stage = GameStage::Ended,
             PlayerDisconnected { player_id } => {
                 self.players.remove(player_id);
             }
-            PlaceTile { player_id, at } => {
-                let piece = self.get_player_tile(player_id).unwrap();
-                self.board[*at] = piece;
-                self.active_plauer_id = self
-                    .players
-                    .keys()
-                    .find(|id| *id != player_id)
-                    .unwrap()
-                    .clone();
+            PlayerJoined {
+                player_id,
+                player_details,
+            } => {
+                self.players.insert(*player_id, player_details.clone());
+            }
+            ShipMove {
+                player_id: _,
+                at: _,
+            } => {
+                self.cur_player = self.next_player();
+            }
+            ShipPlaced {
+                player_id: _,
+                at: _,
+            } => {
+                self.cur_player = self.next_player();
             }
         }
 
         self.history.push(valid_event.clone());
     }
 
-    /// Gets a players tile, if the player is know to game state
-    pub fn get_player_tile(&self, player_id: &PlayerId) -> Option<Tile> {
-        if let Some(player) = self.players.get(player_id) {
-            return Some(player.piece);
-        }
-        None
-    }
-
-    /// Determines if someone has won the game
-    pub fn determine_winner(&self) -> Option<PlayerId> {
-        // All the combinations of 3 tiles that wins the game
-        let row1: [usize; 3] = [0, 1, 2];
-        let row2: [usize; 3] = [3, 4, 5];
-        let row3: [usize; 3] = [6, 7, 8];
-        let col1: [usize; 3] = [0, 3, 6];
-        let col2: [usize; 3] = [1, 4, 7];
-        let col3: [usize; 3] = [2, 5, 8];
-        let diag1: [usize; 3] = [0, 4, 8];
-        let diag2: [usize; 3] = [2, 4, 6];
-        for arr in [row1, row2, row3, col1, col2, col3, diag1, diag2] {
-            // Read tiles from board
-            let tiles: [Tile; 3] = [self.board[arr[0]], self.board[arr[1]], self.board[arr[2]]];
-            // Determine if tile are all equal
-            let all_are_the_same = tiles
-                .get(0)
-                .map(|first| tiles.iter().all(|x| x == first))
-                .unwrap_or(true);
-
-            if all_are_the_same {
-                // Determine which of the players won
-                if let Some((winner, _)) = self
-                    .players
-                    .iter()
-                    .find(|(_, player)| player.piece == self.board[arr[0]])
-                {
-                    return Some(*winner);
+    fn next_player(&self) -> Option<PlayerId> {
+        if let Some(player_moved) = self.cur_player {
+            for (key, _) in self.players.iter() {
+                if player_moved != *key {
+                    return Some(*key);
                 }
             }
         }
         None
+    }
+
+    fn is_player_turn(&self, player_id: &PlayerId) -> bool {
+        if let Some(p) = self.cur_player {
+            if *player_id == p {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -196,14 +177,4 @@ impl GameState {
 pub enum EndGameReason {
     PlayerLeft { player_id: PlayerId },
     PlayerWon { winner: PlayerId },
-}
-
-/// An event that progresses the GameState forward
-#[derive(Debug, Clone, Serialize, PartialEq, Deserialize)]
-pub enum GameEvent {
-    BeginGame { goes_first: PlayerId },
-    EndGame { reason: EndGameReason },
-    PlayerJoined { player_id: PlayerId, name: String },
-    PlayerDisconnected { player_id: PlayerId },
-    PlaceTile { player_id: PlayerId, at: usize },
 }

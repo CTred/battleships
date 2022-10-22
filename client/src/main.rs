@@ -1,21 +1,14 @@
-// pub mod camera;
-// pub mod selection;
-// pub mod state;
-// pub mod ui;
-
-// use camera::CameraPlugin;
-// use selection::SelectionPlugin;
-// use state::StatePlugin;
-// use ui::UiPlugin;
-
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
-use bevy_renet::RenetClientPlugin;
+use bevy_renet::{run_if_client_connected, RenetClientPlugin};
 use renet::{
     ClientAuthentication, RenetClient, RenetConnectionConfig, RenetError, NETCODE_USER_DATA_BYTES,
 };
 use std::{net::UdpSocket, time::SystemTime};
-use store::{GameEvent, GameState};
+use store::{
+    camera::{CameraPlugin, MouseWorldPos},
+    map::{HexMap, Hexagon},
+    GameEvent, GameState,
+};
 
 // This id needs to be the same as the server is using
 const PROTOCOL_ID: u64 = 1208;
@@ -29,7 +22,7 @@ fn main() {
     app.insert_resource(WindowDescriptor {
         width: 480.0,
         height: 540.0,
-        title: format!("GalacticWars <{}>", username),
+        title: format!("BattleGrounds <{}>", username),
         ..Default::default()
     })
     .insert_resource(ClearColor(Color::hex("282828").unwrap()))
@@ -43,9 +36,16 @@ fn main() {
     .add_event::<GameEvent>()
     .add_startup_system(setup)
     .add_system(input)
-    .add_system(update_waiting_text);
+    .add_system(update_board)
+    .add_system_to_stage(
+        CoreStage::PostUpdate,
+        // Renet exposes a nice run criteria
+        // that can be used to make sure that this system only runs when connected
+        receive_events_from_server.with_run_criteria(run_if_client_connected),
+    );
 
     // my own code
+    app.add_plugin(CameraPlugin);
     // .add_startup_system(setup_level);
     // .add_plugin(MaterialPlugin::<PlanetMaterial>::default())
 
@@ -54,97 +54,100 @@ fn main() {
 
 ////////// COMPONENTS /////////////
 #[derive(Component)]
-struct UIRoot;
-
-#[derive(Component)]
 struct WaitingText;
 
-////////// SETUP /////////////
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    // TicTacTussle is a 2D game
-    // We need a 2d camera
-    commands.spawn_bundle(Camera2dBundle::default());
+type TileIndex = usize;
+#[derive(Component)]
+struct HoverDot(pub TileIndex);
 
+////////// SETUP /////////////
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     // Spawn board background
-    commands.spawn_bundle(SpriteBundle {
-        transform: Transform::from_xyz(0.0, -30.0, 0.0),
-        sprite: Sprite {
-            custom_size: Some(Vec2::new(480.0, 480.0)),
-            ..default()
-        },
-        texture: asset_server.load("background.png").into(),
-        ..default()
-    });
 
     // Spawn pregame ui
-    commands
-        // A container that centers its children on the screen
-        .spawn_bundle(NodeBundle {
-            style: Style {
-                position_type: PositionType::Absolute,
-                position: UiRect {
-                    left: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    ..default()
-                },
-                size: Size::new(Val::Percent(100.0), Val::Px(60.0)),
-                align_items: AlignItems::Center,
+
+    // Spawn hexmap
+    let hex_map = HexMap::new(5, 3, 1.0);
+    for hex in hex_map.hexes {
+        let hex_pos = hex.world_pos();
+        commands.spawn_bundle(MaterialMeshBundle {
+            mesh: meshes.add(hex.to_mesh()),
+            material: materials.add(StandardMaterial {
+                base_color: Color::GRAY,
+                unlit: true,
                 ..default()
-            },
-            color: Color::NONE.into(),
+            }),
+            transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
             ..default()
-        })
-        .insert(UIRoot)
-        .with_children(|parent| {
-            parent
-                .spawn_bundle(TextBundle::from_section(
-                    "Waiting for an opponent...",
-                    TextStyle {
-                        font: asset_server.load("Inconsolata.ttf"),
-                        font_size: 24.0,
-                        color: Color::hex("ebdbb2").unwrap(),
-                    },
-                ))
-                .insert(WaitingText);
         });
+    }
 }
 
 /////////// UPDATE SYSTEMTS /////////////
 
-fn update_waiting_text(mut text_query: Query<&mut Text, With<WaitingText>>, time: Res<Time>) {
-    if let Ok(mut text) = text_query.get_single_mut() {
-        let num_dots = (time.time_since_startup().as_secs() % 3) + 1;
-        text.sections[0].value = format!(
-            "Waiting for an opponent{}{}",
-            ".".repeat(num_dots as usize),
-            // Pad with spaces to avoid text changing width and dancing all around
-            " ".repeat(3 - num_dots as usize)
-        );
+fn input(
+    input: Res<Input<MouseButton>>,
+    ms_pos: Res<MouseWorldPos>,
+    game_state: Res<GameState>,
+    mut client: ResMut<RenetClient>,
+) {
+    // If left mouse button is pressed, send mouse world pos
+    if input.just_pressed(MouseButton::Left) {
+        // We only want to handle inputs once we are ingame
+        match game_state.stage {
+            store::GameStage::PreGame => {
+                let event = GameEvent::ShipPlaced {
+                    player_id: client.client_id(),
+                    at: ms_pos.0,
+                };
+                client.send_message(0, bincode::serialize(&event).unwrap());
+            }
+            store::GameStage::InGame => {
+                let event = GameEvent::ShipMove {
+                    player_id: client.client_id(),
+                    at: ms_pos.0,
+                };
+                client.send_message(0, bincode::serialize(&event).unwrap());
+            }
+            _ => {
+                return;
+            }
+        };
     }
 }
 
-fn input(windows: Res<Windows>, input: Res<Input<MouseButton>>, game_state: Res<GameState>) {
-    let window = windows.get_primary().unwrap();
-    if let Some(mouse_position) = window.cursor_position() {
-        // Determine if the index of the tile that the mouse is currently over
-        // NOTE: This calculation assumes a fixed window size.
-        // That's fine for now, but consider using the windows size instead.
-        let x_tile: usize = (mouse_position.x / 160.0).floor() as usize;
-        let y_tile: usize = (mouse_position.y / 160.0).floor() as usize;
-        let tile = x_tile + y_tile * 3;
-
-        // If mouse is outside of board we do nothing
-        if 8 < tile {
-            return;
-        }
-
-        // If left mouse button is pressed, send a place tile event to the server
-        if input.just_pressed(MouseButton::Left) {
-            info!("place piece at tile {:?}", tile);
+fn update_board(
+    mut commands: Commands,
+    game_state: Res<GameState>,
+    mut game_events: EventReader<GameEvent>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for event in game_events.iter() {
+        match event {
+            GameEvent::ShipMove { player_id, at } => {
+                info!("{:?} moved to {:?}", player_id, at);
+            }
+            GameEvent::ShipPlaced { player_id: _, at } => {
+                commands.spawn_bundle(MaterialMeshBundle {
+                    mesh: meshes.add(Hexagon::new(1.0).to_mesh()),
+                    material: materials.add(StandardMaterial {
+                        base_color: Color::GREEN,
+                        unlit: true,
+                        ..default()
+                    }),
+                    transform: Transform::from_xyz(at.x, at.y, -1.0),
+                    ..default()
+                });
+            }
+            _ => {}
         }
     }
 }
-
 //////////// RENET NETWORKING //////////////
 // Creates a RenetClient that is already connected to a server.
 // Returns an Err if connections fails
@@ -186,28 +189,20 @@ fn handle_renet_error(mut renet_error: EventReader<RenetError>) {
     }
 }
 
-pub fn setup_level(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+fn receive_events_from_server(
+    mut client: ResMut<RenetClient>,
+    mut game_state: ResMut<GameState>,
+    mut game_events: EventWriter<GameEvent>,
 ) {
-    // plane
-    commands
-        .spawn_bundle(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box::new(10., 1., 10.))),
-            material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-            transform: Transform::from_xyz(0.0, -1.0, 0.0),
-            ..Default::default()
-        })
-        .insert(Collider::cuboid(5., 0.5, 5.));
-    // light
-    commands.spawn_bundle(PointLightBundle {
-        point_light: PointLight {
-            intensity: 1500.0,
-            shadows_enabled: true,
-            ..Default::default()
-        },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..Default::default()
-    });
+    while let Some(message) = client.receive_message(0) {
+        // Whenever the server sends a message we know it must be a game event
+        let event: GameEvent = bincode::deserialize(&message).unwrap();
+        trace!("{:#?}", event);
+
+        // We trust the server, no need to validade events
+        game_state.consume(&event);
+
+        // Send the event into the bevy event system so systems can react to it
+        game_events.send(event);
+    }
 }
