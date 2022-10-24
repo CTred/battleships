@@ -1,23 +1,73 @@
+use std::ops::{Add, Sub};
+
 use bevy::prelude::*;
 use bevy::render::{mesh::Indices, render_resource::PrimitiveTopology};
+
+#[derive(Clone, Copy, Debug, Hash)]
+pub struct CubeCoords {
+    pub q: i32,
+    pub r: i32,
+    pub s: i32,
+}
+impl Add for CubeCoords {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            q: self.q + rhs.q,
+            r: self.r + rhs.r,
+            s: self.s + rhs.s,
+        }
+    }
+}
+impl Sub for CubeCoords {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            q: self.q - rhs.q,
+            r: self.r - rhs.r,
+            s: self.s - rhs.s,
+        }
+    }
+}
+
+const CUBE_NEIGHBORS: [CubeCoords; 6] = [
+    CubeCoords { q: 1, r: 0, s: -1 },
+    CubeCoords { q: 1, r: -1, s: 0 },
+    CubeCoords { q: 0, r: -1, s: 1 },
+    CubeCoords { q: -1, r: 0, s: 1 },
+    CubeCoords { q: -1, r: 1, s: 0 },
+    CubeCoords { q: 0, r: 1, s: -1 },
+];
+
+const CUBE_DIAGONALS: [CubeCoords; 6] = [
+    CubeCoords { q: 2, r: -1, s: -1 },
+    CubeCoords { q: 1, r: -2, s: 1 },
+    CubeCoords { q: -1, r: -1, s: 2 },
+    CubeCoords { q: -2, r: 1, s: 1 },
+    CubeCoords { q: -1, r: 2, s: -1 },
+    CubeCoords { q: 1, r: 1, s: -2 },
+];
 
 #[derive(Clone, Debug)]
 pub struct Hexagon {
     pub size: f32,
+    pub padding: f32,
     pub height: f32,
     pub width: f32,
-    pub coordinates: Option<[u32; 3]>,
-    // pub neighbors: Option<[&Hexagon; 6]>,
+    pub coords: Option<CubeCoords>,
 }
 
 impl Hexagon {
     /// Create a new Hexagon struct
-    pub fn new(size: f32) -> Self {
+    pub fn new(size: f32, padding: f32) -> Self {
         Hexagon {
             size,
-            height: 3.0_f32.sqrt() * size,
-            width: 2.0 * size,
-            coordinates: None,
+            padding,
+            height: 3.0_f32.sqrt() * size + padding,
+            width: 2.0 * size + padding,
+            coords: None,
             // neighbors: None,
         }
     }
@@ -55,77 +105,110 @@ impl Hexagon {
         mesh
     }
 
-    // TODO: change to Axial Coordinate System
     pub fn world_pos(&self) -> Vec3 {
-        let pos = Vec3::new(0.0, 0.0, 0.0);
-        let coordinates = self
-            .coordinates
+        let coords = self
+            .coords
+            .as_ref()
             .expect("Cannot return Vec3 for a hex without a coordinate");
-        let y_offset = (coordinates[0] % 2) as f32 * self.height * 0.5;
-        let x_offset = 0.75 * self.width;
-        Vec3::new(
-            pos.x + coordinates[0] as f32 * x_offset,
-            pos.y + self.height * coordinates[1] as f32 + y_offset,
-            0.0,
-        )
+
+        // this is for axial coordinates
+        let y_offset = self.height * (coords.s as f32 + 0.5 * coords.q as f32);
+        let x_offset = 0.75 * self.width * coords.q as f32;
+
+        // this is for offset coordinates only
+        // let y_offset = (coordinates[0] % 2) as f32 * self.height * 0.5;
+        // let x_offset = 0.75 * self.width;
+
+        trace!("x: {:?}, y: {:?}", x_offset, y_offset);
+        Vec3::new(x_offset, y_offset, 0.0)
+    }
+
+    pub fn distance(&self, hex: &Hexagon) -> Option<f32> {
+        if let Some(coords) = &self.coords {
+            if let Some(hex_coords) = &hex.coords {
+                let dist = hex_coords.clone() - coords.clone();
+                return Some((dist.q.abs() + dist.r.abs() + dist.s.abs()) as f32 / 2.0);
+            }
+        }
+        None
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct HexMap {
-    pub hex_size: f32,
+    pub total_hex_size: f32,
     pub hexes: Vec<Hexagon>,
 }
 
 impl HexMap {
-    pub fn new(self, size: f32, coordinate_sys: CoordinateSystem) -> Self {
-        // TODO: change to Axial Coordinate System
-        let hexes = match coordinate_sys {
-            CoordinateSystem::Offset(offset_type) => hexes_from_offset(offset_type, size),
-            CoordinateSystem::Axial(radius) => hexes_from_axial(radius, size),
-        };
+    pub fn new_from_axial(radius: i32, hex_size: f32, padding: f32) -> Self {
+        let mut hex = Hexagon::new(hex_size, padding);
+        let mut hexes = Vec::new();
+        for q in -radius..=radius {
+            for s in -radius..=radius {
+                let r: i32 = -s - q;
+                if r.abs() > 3 {
+                    continue;
+                }
+                hex.coords = Some(CubeCoords { q, r, s });
+                println!("{:?}", &hex.coords);
+                hexes.push(hex.clone());
+            }
+        }
         HexMap {
-            hex_size: size,
+            total_hex_size: hex_size + padding,
             hexes,
         }
     }
 
-    // pub fn get_hex_from_pos(pos: Vec3) -> &Hexagon {}
-    pub fn coordinate_from_pos(pos: Vec2) -> [u32; 3] {
-        [0, 0, 0]
-    }
-}
+    pub fn world_pos_to_coordinates(&self, pos: Vec2) -> CubeCoords {
+        let basis_vec = Mat2::from_cols(
+            Vec2 {
+                x: 1.5,
+                y: 3_f32.sqrt() / 2.0,
+            },
+            Vec2 {
+                x: 0.,
+                y: 3_f32.sqrt(),
+            },
+        );
 
-fn hexes_from_offset(offset_type: OffsetType, size: f32) -> Vec<Hexagon> {
-    let mut hex = Hexagon::new(size);
-    let mut hexes = Vec::new();
-    match offset_type {
-        OffsetType::EvenQ(width, height) => {
-            for i in 0..height {
-                for j in 0..width {
-                    hex.coordinates = Some([j, i, 0]);
-                    hex.coordinates = Some([j, i, 0]);
-                    hexes.push(hex.clone());
-                }
-            }
+        let q_r = basis_vec * pos / self.total_hex_size;
+        CubeCoords {
+            q: q_r.x as i32,
+            r: q_r.y as i32,
+            s: (-q_r.x - q_r.y) as i32,
         }
-    };
-    hexes
+    }
+    // pub fn get_hex_from_pos(pos: Vec3) -> &Hexagon {}
+    // pub fn coordinate_from_pos(pos: Vec2) -> [u32; 3] {}
 }
 
-fn hexes_from_axial(radius: u32, size: f32) -> Vec<Hexagon> {
-    let mut hex = Hexagon::new(size);
-    let mut hexes = Vec::new();
-}
+// fn hexes_from_offset(offset_type: OffsetType, size: f32) -> Vec<Hexagon> {
+//     let mut hex = Hexagon::new(size);
+//     let mut hexes = Vec::new();
+//     match offset_type {
+//         OffsetType::EvenQ(width, height) => {
+//             for i in 0..height {
+//                 for j in 0..width {
+//                     // TODO: convert Offset to Axial Coords
+//                     hex.coordinates = Some(offset_to_axial_coords(i, j));
+//                     hexes.push(hex.clone());
+//                 }
+//             }
+//         }
+//     };
+//     hexes
+// }
+// fn offset_to_axial_coords(x: i32, y: i32) -> CubeCoords {}
 
-fn offset_to_axial_coords(x: u32, y: u32) -> [u32; 2] {}
-fn axial_to_offset_coords(x: u32, y: u32) -> [u32; 2] {}
+// fn axial_to_offset_coords(x: u32, y: u32) -> [u32; 2] {}
 
 pub enum CoordinateSystem {
     // Square maps. u32, u32 sets width and heigh respectively
-    Offset(OffsetType),
+    // Offset(OffsetType),
     // Round maps. u32 the radius (number of 'rings' around center)
-    Axial(u32),
+    Axial(i32),
 }
 
 pub enum OffsetType {

@@ -60,6 +60,7 @@ type TileIndex = usize;
 #[derive(Component)]
 struct HoverDot(pub TileIndex);
 
+struct MapIndex(Vec<Vec<Handle<StandardMaterial>>>);
 ////////// SETUP /////////////
 fn setup(
     mut commands: Commands,
@@ -71,7 +72,7 @@ fn setup(
     // Spawn pregame ui
 
     // Spawn hexmap
-    let hex_map = HexMap::new(5, 3, 1.0);
+    let hex_map = HexMap::new_from_axial(3, 1.0, 0.1);
     for hex in hex_map.hexes {
         let hex_pos = hex.world_pos();
         commands.spawn_bundle(MaterialMeshBundle {
@@ -134,7 +135,7 @@ fn update_board(
             }
             GameEvent::ShipPlaced { player_id: _, at } => {
                 commands.spawn_bundle(MaterialMeshBundle {
-                    mesh: meshes.add(Hexagon::new(1.0).to_mesh()),
+                    mesh: meshes.add(Hexagon::new(1.0, 0.1).to_mesh()),
                     material: materials.add(StandardMaterial {
                         base_color: Color::GREEN,
                         unlit: true,
