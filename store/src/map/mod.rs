@@ -2,12 +2,20 @@ use std::ops::{Add, Sub};
 
 use bevy::prelude::*;
 use bevy::render::{mesh::Indices, render_resource::PrimitiveTopology};
+use bevy::utils::HashMap;
 
 #[derive(Clone, Copy, Debug, Hash)]
 pub struct CubeCoords {
     pub q: i32,
     pub r: i32,
     pub s: i32,
+}
+
+impl Eq for CubeCoords {}
+impl PartialEq for CubeCoords {
+    fn eq(&self, other: &Self) -> bool {
+        self.q == other.q && self.r == other.r && self.s == other.s
+    }
 }
 impl Add for CubeCoords {
     type Output = Self;
@@ -50,6 +58,9 @@ const CUBE_DIAGONALS: [CubeCoords; 6] = [
     CubeCoords { q: 1, r: 1, s: -2 },
 ];
 
+#[derive(Component)]
+pub struct Hex;
+
 #[derive(Clone, Debug)]
 pub struct Hexagon {
     pub size: f32,
@@ -65,8 +76,8 @@ impl Hexagon {
         Hexagon {
             size,
             padding,
-            height: 3.0_f32.sqrt() * size + padding,
-            width: 2.0 * size + padding,
+            height: 3.0_f32.sqrt() * (size + padding),
+            width: 2.0 * (size + padding),
             coords: None,
             // neighbors: None,
         }
@@ -134,7 +145,13 @@ impl Hexagon {
     }
 }
 
-#[derive(Component, Debug)]
+#[derive(Debug, Default)]
+pub struct HexMapEntities(pub HashMap<CubeCoords, Entity>);
+
+#[derive(Debug, Default)]
+pub struct HexHover(pub Option<CubeCoords>);
+
+#[derive(Debug)]
 pub struct HexMap {
     pub total_hex_size: f32,
     pub hexes: Vec<Hexagon>,
@@ -164,26 +181,42 @@ impl HexMap {
     pub fn world_pos_to_coordinates(&self, pos: Vec2) -> CubeCoords {
         let basis_vec = Mat2::from_cols(
             Vec2 {
-                x: 1.5,
-                y: 3_f32.sqrt() / 2.0,
+                x: 2.0 / 3.0,
+                y: -1.0 / 3.0,
             },
             Vec2 {
                 x: 0.,
-                y: 3_f32.sqrt(),
+                y: 3_f32.sqrt() / 3.0,
             },
         );
 
         let q_r = basis_vec * pos / self.total_hex_size;
-        CubeCoords {
-            q: q_r.x as i32,
-            r: q_r.y as i32,
-            s: (-q_r.x - q_r.y) as i32,
-        }
+        cube_round(q_r.x, q_r.y, q_r.x - q_r.y)
     }
     // pub fn get_hex_from_pos(pos: Vec3) -> &Hexagon {}
     // pub fn coordinate_from_pos(pos: Vec2) -> [u32; 3] {}
 }
 
+fn cube_round(q: f32, r: f32, s: f32) -> CubeCoords {
+    let mut qr = q.round();
+    let mut rr = r.round();
+    let mut sr = s.round();
+    let q_diff = (q - qr).abs();
+    let r_diff = (r - rr).abs();
+    let s_diff = (s - sr).abs();
+    if (q_diff > r_diff) & (q_diff > s_diff) {
+        qr = -rr - sr;
+    } else if r_diff > s_diff {
+        rr = -qr - sr
+    } else {
+        sr = -qr - sr
+    }
+    CubeCoords {
+        q: qr as i32,
+        r: rr as i32,
+        s: sr as i32,
+    }
+}
 // fn hexes_from_offset(offset_type: OffsetType, size: f32) -> Vec<Hexagon> {
 //     let mut hex = Hexagon::new(size);
 //     let mut hexes = Vec::new();

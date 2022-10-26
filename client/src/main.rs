@@ -6,7 +6,7 @@ use renet::{
 use std::{net::UdpSocket, time::SystemTime};
 use store::{
     camera::{CameraPlugin, MouseWorldPos},
-    map::{HexMap, Hexagon},
+    map::{Hex, HexHover, HexMap, HexMapEntities, Hexagon},
     GameEvent, GameState,
 };
 
@@ -34,9 +34,14 @@ fn main() {
     // Add game state and register GameEvent
     .insert_resource(GameState::default())
     .add_event::<GameEvent>()
+    // my own code
+    .insert_resource(store::map::HexMapEntities::default())
+    .insert_resource(store::map::HexHover::default())
+    .insert_resource(store::map::HexMap::new_from_axial(3, 1.0, 0.1))
     .add_startup_system(setup)
     .add_system(input)
     .add_system(update_board)
+    .add_system(mouse_to_hex_coords)
     .add_system_to_stage(
         CoreStage::PostUpdate,
         // Renet exposes a nice run criteria
@@ -44,7 +49,6 @@ fn main() {
         receive_events_from_server.with_run_criteria(run_if_client_connected),
     );
 
-    // my own code
     app.add_plugin(CameraPlugin);
     // .add_startup_system(setup_level);
     // .add_plugin(MaterialPlugin::<PlanetMaterial>::default())
@@ -60,31 +64,35 @@ type TileIndex = usize;
 #[derive(Component)]
 struct HoverDot(pub TileIndex);
 
-struct MapIndex(Vec<Vec<Handle<StandardMaterial>>>);
 ////////// SETUP /////////////
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    board_config: Res<HexMap>,
+    mut board_entities: ResMut<HexMapEntities>,
 ) {
     // Spawn board background
 
     // Spawn pregame ui
 
     // Spawn hexmap
-    let hex_map = HexMap::new_from_axial(3, 1.0, 0.1);
-    for hex in hex_map.hexes {
+    for hex in &board_config.hexes {
         let hex_pos = hex.world_pos();
-        commands.spawn_bundle(MaterialMeshBundle {
-            mesh: meshes.add(hex.to_mesh()),
-            material: materials.add(StandardMaterial {
-                base_color: Color::GRAY,
-                unlit: true,
+        let entity = commands
+            .spawn_bundle(MaterialMeshBundle {
+                mesh: meshes.add(hex.to_mesh()),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::GRAY,
+                    unlit: true,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
                 ..default()
-            }),
-            transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
-            ..default()
-        });
+            })
+            .insert(Hex)
+            .id();
+        board_entities.0.insert(hex.coords.unwrap(), entity);
     }
 }
 
@@ -148,6 +156,41 @@ fn update_board(
             _ => {}
         }
     }
+}
+
+fn mouse_to_hex_coords(
+    ms_pos: Res<MouseWorldPos>,
+    board_config: Res<HexMap>,
+    mut hex_hover: ResMut<HexHover>,
+    hex_board: Res<HexMapEntities>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    query: Query<&Handle<StandardMaterial>, With<Hex>>,
+) {
+    match hex_hover.0 {
+        Some(coord) => {
+            let new_coord = board_config.world_pos_to_coordinates(ms_pos.0);
+            if coord != new_coord {
+                if let Some(entity) = hex_board.0.get(&new_coord) {
+                    if let Ok(mat) = query.get(*entity) {
+                        let material = materials.get_mut(mat).unwrap();
+                        material.base_color = Color::rgb(0.9, 0.1, 0.9);
+                        // let handle = materials.add(StandardMaterial {
+                        //     base_color: Color::GREEN,
+                        //     unlit: true,
+                        //     ..default()
+                        // });
+                        // mat = &handle;
+
+                        println!("new coord: {:?}!", new_coord);
+                        hex_hover.0 = Some(new_coord);
+                    }
+                }
+            }
+        }
+        None => {
+            hex_hover.0 = Some(board_config.world_pos_to_coordinates(ms_pos.0));
+        }
+    };
 }
 //////////// RENET NETWORKING //////////////
 // Creates a RenetClient that is already connected to a server.
