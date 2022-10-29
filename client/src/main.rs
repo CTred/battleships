@@ -6,7 +6,7 @@ use renet::{
 use std::{net::UdpSocket, time::SystemTime};
 use store::{
     camera::{CameraPlugin, MouseWorldPos},
-    map::{Hex, HexHover, HexMap, HexMapEntities, Hexagon},
+    map::{Hex, HexHover, HexMap, HexMapEntities, HexStatus, Hexagon},
     GameEvent, GameState,
 };
 
@@ -36,12 +36,11 @@ fn main() {
     .add_event::<GameEvent>()
     // my own code
     .insert_resource(store::map::HexMapEntities::default())
-    .insert_resource(store::map::HexHover::default())
-    .insert_resource(store::map::HexMap::new_from_axial(3, 1.0, 0.1))
+    .insert_resource(store::map::HexMap::new_from_axial(8, 1.0, 0.1))
     .add_startup_system(setup)
     .add_system(input)
     .add_system(update_board)
-    .add_system(mouse_to_hex_coords)
+    .add_system(update_hover_hex)
     .add_system_to_stage(
         CoreStage::PostUpdate,
         // Renet exposes a nice run criteria
@@ -83,14 +82,14 @@ fn setup(
             .spawn_bundle(MaterialMeshBundle {
                 mesh: meshes.add(hex.to_mesh()),
                 material: materials.add(StandardMaterial {
-                    base_color: Color::GRAY,
+                    base_color: Color::rgb(0.67, 0.67, 0.67),
                     unlit: true,
                     ..default()
                 }),
                 transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
                 ..default()
             })
-            .insert(Hex)
+            .insert(Hex(HexStatus::Cold))
             .id();
         board_entities.0.insert(hex.coords.unwrap(), entity);
     }
@@ -142,55 +141,81 @@ fn update_board(
                 info!("{:?} moved to {:?}", player_id, at);
             }
             GameEvent::ShipPlaced { player_id: _, at } => {
-                commands.spawn_bundle(MaterialMeshBundle {
-                    mesh: meshes.add(Hexagon::new(1.0, 0.1).to_mesh()),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::GREEN,
-                        unlit: true,
-                        ..default()
-                    }),
-                    transform: Transform::from_xyz(at.x, at.y, -1.0),
-                    ..default()
-                });
+                info!("{:?} ship placed", at);
             }
             _ => {}
         }
     }
 }
 
-fn mouse_to_hex_coords(
+fn update_hover_hex(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     ms_pos: Res<MouseWorldPos>,
     board_config: Res<HexMap>,
-    mut hex_hover: ResMut<HexHover>,
     hex_board: Res<HexMapEntities>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    query: Query<&Handle<StandardMaterial>, With<Hex>>,
+    mut query: Query<(&mut Transform, &mut Visibility), With<HexHover>>,
 ) {
-    match hex_hover.0 {
-        Some(coord) => {
-            let new_coord = board_config.world_pos_to_coordinates(ms_pos.0);
-            if coord != new_coord {
-                if let Some(entity) = hex_board.0.get(&new_coord) {
-                    if let Ok(mat) = query.get(*entity) {
-                        let material = materials.get_mut(mat).unwrap();
-                        material.base_color = Color::rgb(0.9, 0.1, 0.9);
-                        // let handle = materials.add(StandardMaterial {
-                        //     base_color: Color::GREEN,
-                        //     unlit: true,
-                        //     ..default()
-                        // });
-                        // mat = &handle;
-
-                        println!("new coord: {:?}!", new_coord);
-                        hex_hover.0 = Some(new_coord);
-                    }
-                }
-            }
-        }
-        None => {
-            hex_hover.0 = Some(board_config.world_pos_to_coordinates(ms_pos.0));
-        }
+    let cur_coord = board_config.world_pos_to_coordinates(ms_pos.0);
+    let is_entity = match hex_board.0.get(&cur_coord) {
+        Some(_) => true,
+        None => false,
     };
+    let hex_config = &board_config.hexes[0];
+    let hex = Hexagon::new(hex_config.size, hex_config.padding, Some(cur_coord), 1.0);
+    let hex_pos = hex.world_pos();
+
+    match query.get_single_mut() {
+        Ok((mut transf, mut vis)) => {
+            transf.translation = Vec3::new(hex_pos.x, hex_pos.y, hex_pos.z);
+            vis.is_visible = is_entity;
+        }
+        Err(query_error) => match query_error {
+            bevy::ecs::query::QuerySingleError::NoEntities(_) => {
+                commands
+                    .spawn_bundle(MaterialMeshBundle {
+                        mesh: meshes.add(hex.to_mesh()),
+                        material: materials.add(StandardMaterial {
+                            base_color: Color::rgb(0.87, 0.87, 0.87),
+                            unlit: true,
+                            ..default()
+                        }),
+                        transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
+                        visibility: Visibility {
+                            is_visible: is_entity,
+                        },
+                        ..default()
+                    })
+                    .insert(HexHover);
+            }
+            bevy::ecs::query::QuerySingleError::MultipleEntities(_) => {
+                panic!("expected one or no entity")
+            }
+        },
+    }
+}
+
+fn hex_to_color(
+    hex: &Hex,
+    handle: &Handle<StandardMaterial>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    let mut material = materials.get_mut(&handle).unwrap();
+    match hex.0 {
+        HexStatus::Cold => {
+            material.base_color = Color::rgb(0.67, 0.67, 0.67);
+        }
+        HexStatus::Hot => {
+            material.base_color = Color::rgb(0.87, 0.87, 0.87);
+        }
+        HexStatus::Selected => {
+            material.base_color = Color::rgb(0.20, 0.90, 0.20);
+        }
+        HexStatus::Damage => {
+            material.base_color = Color::rgb(0.9, 0.1, 0.1);
+        }
+    }
 }
 //////////// RENET NETWORKING //////////////
 // Creates a RenetClient that is already connected to a server.

@@ -1,3 +1,12 @@
+# Enable small amount of opt in debug mode
+[provile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies, but not for code
+[profile.dev.package."*"]
+opt-level = 3
+
+
 [package]
 name = "server"
 version = "0.1.0"

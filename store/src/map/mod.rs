@@ -58,8 +58,8 @@ const CUBE_DIAGONALS: [CubeCoords; 6] = [
     CubeCoords { q: 1, r: 1, s: -2 },
 ];
 
-#[derive(Component)]
-pub struct Hex;
+#[derive(Component, Copy, Clone)]
+pub struct Hex(pub HexStatus);
 
 #[derive(Clone, Debug)]
 pub struct Hexagon {
@@ -68,18 +68,19 @@ pub struct Hexagon {
     pub height: f32,
     pub width: f32,
     pub coords: Option<CubeCoords>,
+    pub layer: f32,
 }
 
 impl Hexagon {
     /// Create a new Hexagon struct
-    pub fn new(size: f32, padding: f32) -> Self {
+    pub fn new(size: f32, padding: f32, coords: Option<CubeCoords>, layer: f32) -> Self {
         Hexagon {
             size,
             padding,
             height: 3.0_f32.sqrt() * (size + padding),
             width: 2.0 * (size + padding),
-            coords: None,
-            // neighbors: None,
+            coords,
+            layer, // neighbors: None,
         }
     }
 
@@ -131,7 +132,7 @@ impl Hexagon {
         // let x_offset = 0.75 * self.width;
 
         trace!("x: {:?}, y: {:?}", x_offset, y_offset);
-        Vec3::new(x_offset, y_offset, 0.0)
+        Vec3::new(x_offset, y_offset, self.layer)
     }
 
     pub fn distance(&self, hex: &Hexagon) -> Option<f32> {
@@ -148,8 +149,8 @@ impl Hexagon {
 #[derive(Debug, Default)]
 pub struct HexMapEntities(pub HashMap<CubeCoords, Entity>);
 
-#[derive(Debug, Default)]
-pub struct HexHover(pub Option<CubeCoords>);
+#[derive(Debug, Component)]
+pub struct HexHover;
 
 #[derive(Debug)]
 pub struct HexMap {
@@ -159,17 +160,19 @@ pub struct HexMap {
 
 impl HexMap {
     pub fn new_from_axial(radius: i32, hex_size: f32, padding: f32) -> Self {
-        let mut hex = Hexagon::new(hex_size, padding);
         let mut hexes = Vec::new();
         for q in -radius..=radius {
             for s in -radius..=radius {
                 let r: i32 = -s - q;
-                if r.abs() > 3 {
+                if r.abs() > radius {
                     continue;
                 }
-                hex.coords = Some(CubeCoords { q, r, s });
-                println!("{:?}", &hex.coords);
-                hexes.push(hex.clone());
+                hexes.push(Hexagon::new(
+                    hex_size,
+                    padding,
+                    Some(CubeCoords { q, r, s }),
+                    0.0,
+                ));
             }
         }
         HexMap {
@@ -191,7 +194,7 @@ impl HexMap {
         );
 
         let q_r = basis_vec * pos / self.total_hex_size;
-        cube_round(q_r.x, q_r.y, q_r.x - q_r.y)
+        cube_round(q_r.x, -q_r.x - q_r.y, q_r.y)
     }
     // pub fn get_hex_from_pos(pos: Vec3) -> &Hexagon {}
     // pub fn coordinate_from_pos(pos: Vec2) -> [u32; 3] {}
@@ -209,7 +212,7 @@ fn cube_round(q: f32, r: f32, s: f32) -> CubeCoords {
     } else if r_diff > s_diff {
         rr = -qr - sr
     } else {
-        sr = -qr - sr
+        sr = -qr - rr
     }
     CubeCoords {
         q: qr as i32,
@@ -247,4 +250,12 @@ pub enum CoordinateSystem {
 pub enum OffsetType {
     // vertical layout. shoves odd columns up
     EvenQ(u32, u32),
+}
+
+#[derive(PartialEq, Copy, Clone)]
+pub enum HexStatus {
+    Cold,
+    Hot,
+    Selected,
+    Damage,
 }
