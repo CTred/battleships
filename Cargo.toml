@@ -1,8 +1,17 @@
+# Enable small amount of opt in debug mode
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies, but not for code
+[profile.dev.package."*"]
+opt-level = 3
+
 [workspace]
 resolver="2"
 
 members = [
   "client",
   "server",
-  "store"
+  "store",
+  "ui",
 ]

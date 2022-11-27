@@ -18,8 +18,8 @@ impl Plugin for CameraPlugin {
 }
 
 fn camera_setup(mut commands: Commands) {
-    commands
-        .spawn_bundle(Camera3dBundle {
+    commands.spawn((
+        Camera3dBundle {
             projection: OrthographicProjection {
                 scale: 3.0,
                 scaling_mode: ScalingMode::FixedVertical(5.0),
@@ -34,6 +34,7 @@ fn camera_setup(mut commands: Commands) {
             // },
             transform: { Transform::from_xyz(0., 0., 50.) },
             ..default()
-        })
-        .insert(MainCamera);
+        },
+        MainCamera,
+    ));
 }

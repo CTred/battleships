@@ -5,3 +5,5 @@ pub struct MainCamera;
 
 #[derive(Default)]
 pub struct MouseWorldPos(pub Vec2);
+
+impl Resource for MouseWorldPos {}

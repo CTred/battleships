@@ -1,15 +1,20 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, window::PresentMode};
 use bevy_renet::{run_if_client_connected, RenetClientPlugin};
 use renet::{
     ClientAuthentication, RenetClient, RenetConnectionConfig, RenetError, NETCODE_USER_DATA_BYTES,
 };
-use std::{net::UdpSocket, time::SystemTime};
+use std::{iter::Enumerate, net::UdpSocket, time::SystemTime};
 use store::{
     camera::{CameraPlugin, MouseWorldPos},
-    map::{Hex, HexHover, HexMap, HexMapEntities, HexStatus, Hexagon},
+    map::{
+        components::{CubeCoords, Hexagon, MouseCubePos},
+        HexPlugin, HEX_CONFIG_PADDING, HEX_CONFIG_SIZE,
+    },
+    ships::Ship,
     GameEvent, GameState,
 };
 
+use ui::UiPlugin;
 // This id needs to be the same as the server is using
 const PROTOCOL_ID: u64 = 1208;
 
@@ -19,28 +24,31 @@ fn main() {
     let username = &args[1];
 
     let mut app = App::new();
-    app.insert_resource(WindowDescriptor {
-        width: 480.0,
-        height: 540.0,
-        title: format!("BattleGrounds <{}>", username),
-        ..Default::default()
-    })
+
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        window: WindowDescriptor {
+            title: "BattleGrounds!".to_string(),
+            width: 500.,
+            height: 300.,
+            present_mode: PresentMode::AutoVsync,
+            ..default()
+        },
+        ..default()
+    }))
     .insert_resource(ClearColor(Color::hex("282828").unwrap()))
-    .add_plugins(DefaultPlugins)
     // Renet setup
-    .add_plugin(RenetClientPlugin)
+    .add_plugin(RenetClientPlugin::default())
     .insert_resource(new_renet_client(&username).unwrap())
     .add_system(handle_renet_error)
     // Add game state and register GameEvent
     .insert_resource(GameState::default())
     .add_event::<GameEvent>()
     // my own code
-    .insert_resource(store::map::HexMapEntities::default())
-    .insert_resource(store::map::HexMap::new_from_axial(8, 1.0, 0.1))
-    .add_startup_system(setup)
+    .add_startup_system(spawns)
     .add_system(input)
+    .add_plugin(HexPlugin)
+    .add_plugin(UiPlugin)
     .add_system(update_board)
-    .add_system(update_hover_hex)
     .add_system_to_stage(
         CoreStage::PostUpdate,
         // Renet exposes a nice run criteria
@@ -56,50 +64,55 @@ fn main() {
 }
 
 ////////// COMPONENTS /////////////
-#[derive(Component)]
-struct WaitingText;
-
-type TileIndex = usize;
-#[derive(Component)]
-struct HoverDot(pub TileIndex);
 
 ////////// SETUP /////////////
-fn setup(
+fn spawns(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    board_config: Res<HexMap>,
-    mut board_entities: ResMut<HexMapEntities>,
 ) {
-    // Spawn board background
+    let hex = Hexagon::new(
+        HEX_CONFIG_SIZE,
+        HEX_CONFIG_PADDING,
+        Some(CubeCoords { q: 0, r: 0, s: 0 }),
+        1.0,
+    );
 
-    // Spawn pregame ui
+    let mut ship = Ship::new(
+        store::ships::ShipType::Light,
+        1_u64,
+        CubeCoords { q: 0, r: 0, s: 0 },
+        CubeCoords { q: 0, r: -1, s: 1 },
+    );
+    let pos = ship.world_pos();
+    commands.spawn_bundle(MaterialMeshBundle {
+        mesh: meshes.add(ship.to_mesh()),
+        material: materials.add(StandardMaterial {
+            base_color: Color::GOLD,
+            ..default()
+        }),
+        transform: Transform::from_xyz(pos.x, pos.y, pos.z),
+        ..default()
+    });
 
-    // Spawn hexmap
-    for hex in &board_config.hexes {
-        let hex_pos = hex.world_pos();
-        let entity = commands
-            .spawn_bundle(MaterialMeshBundle {
-                mesh: meshes.add(hex.to_mesh()),
-                material: materials.add(StandardMaterial {
-                    base_color: Color::rgb(0.67, 0.67, 0.67),
-                    unlit: true,
-                    ..default()
-                }),
-                transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
-                ..default()
-            })
-            .insert(Hex(HexStatus::Cold))
-            .id();
-        board_entities.0.insert(hex.coords.unwrap(), entity);
-    }
+    let pos = ship.world_pos();
+    commands.spawn_bundle(MaterialMeshBundle {
+        mesh: meshes.add(ship.to_mesh()),
+        material: materials.add(StandardMaterial {
+            base_color: Color::GOLD,
+            ..default()
+        }),
+        transform: Transform::from_xyz(pos.x, pos.y, pos.z),
+        ..default()
+    });
 }
 
 /////////// UPDATE SYSTEMTS /////////////
 
 fn input(
     input: Res<Input<MouseButton>>,
-    ms_pos: Res<MouseWorldPos>,
+    kb_input: Res<Input<KeyCode>>,
+    ms_coord_pos: Res<MouseCubePos>,
     game_state: Res<GameState>,
     mut client: ResMut<RenetClient>,
 ) {
@@ -110,14 +123,15 @@ fn input(
             store::GameStage::PreGame => {
                 let event = GameEvent::ShipPlaced {
                     player_id: client.client_id(),
-                    at: ms_pos.0,
+                    at: ms_coord_pos.0,
+                    rotation: 3,
                 };
                 client.send_message(0, bincode::serialize(&event).unwrap());
             }
             store::GameStage::InGame => {
                 let event = GameEvent::ShipMove {
                     player_id: client.client_id(),
-                    at: ms_pos.0,
+                    at: ms_coord_pos.0,
                 };
                 client.send_message(0, bincode::serialize(&event).unwrap());
             }
@@ -125,6 +139,9 @@ fn input(
                 return;
             }
         };
+    }
+    if kb_input.just_pressed(KeyCode::Space) {
+        info!("game_state: {:?}", game_state);
     }
 }
 
@@ -140,83 +157,44 @@ fn update_board(
             GameEvent::ShipMove { player_id, at } => {
                 info!("{:?} moved to {:?}", player_id, at);
             }
-            GameEvent::ShipPlaced { player_id: _, at } => {
+            GameEvent::ShipPlaced {
+                player_id,
+                at,
+                rotation: _,
+            } => {
+                let ship = Ship::new(store::ships::ShipType::Light, 1_u64, *at, *at);
+                let pos = ship.world_pos();
+                commands.spawn_bundle(MaterialMeshBundle {
+                    mesh: meshes.add(ship.to_mesh()),
+                    material: materials.add(StandardMaterial {
+                        base_color: Color::GOLD,
+                        ..default()
+                    }),
+                    transform: Transform::from_xyz(pos.x, pos.y, pos.z),
+                    ..default()
+                });
                 info!("{:?} ship placed", at);
+                // place_ship(&mut commands, at);
             }
             _ => {}
         }
     }
 }
 
-fn update_hover_hex(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    ms_pos: Res<MouseWorldPos>,
-    board_config: Res<HexMap>,
-    hex_board: Res<HexMapEntities>,
-    mut query: Query<(&mut Transform, &mut Visibility), With<HexHover>>,
-) {
-    let cur_coord = board_config.world_pos_to_coordinates(ms_pos.0);
-    let is_entity = match hex_board.0.get(&cur_coord) {
-        Some(_) => true,
-        None => false,
-    };
-    let hex_config = &board_config.hexes[0];
-    let hex = Hexagon::new(hex_config.size, hex_config.padding, Some(cur_coord), 1.0);
-    let hex_pos = hex.world_pos();
+// fn place_ship(commands: &mut Commands, at: CubeCoords) {
+//     let mut ship = Ship::new(store::ships::ShipType::Light, 1_u64, Some(at), &hex);
+//     let pos = ship.world_pos();
+//     commands.spawn_bundle(MaterialMeshBundle {
+//         mesh: meshes.add(ship.to_mesh()),
+//         material: materials.add(StandardMaterial {
+//             base_color: Color::RED,
+//             ..default()
+//         }),
+//         transform: Transform::from_xyz(pos.x, pos.y, pos.z),
+//         ..default()
+//     });
+// }
 
-    match query.get_single_mut() {
-        Ok((mut transf, mut vis)) => {
-            transf.translation = Vec3::new(hex_pos.x, hex_pos.y, hex_pos.z);
-            vis.is_visible = is_entity;
-        }
-        Err(query_error) => match query_error {
-            bevy::ecs::query::QuerySingleError::NoEntities(_) => {
-                commands
-                    .spawn_bundle(MaterialMeshBundle {
-                        mesh: meshes.add(hex.to_mesh()),
-                        material: materials.add(StandardMaterial {
-                            base_color: Color::rgb(0.87, 0.87, 0.87),
-                            unlit: true,
-                            ..default()
-                        }),
-                        transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
-                        visibility: Visibility {
-                            is_visible: is_entity,
-                        },
-                        ..default()
-                    })
-                    .insert(HexHover);
-            }
-            bevy::ecs::query::QuerySingleError::MultipleEntities(_) => {
-                panic!("expected one or no entity")
-            }
-        },
-    }
-}
-
-fn hex_to_color(
-    hex: &Hex,
-    handle: &Handle<StandardMaterial>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-) {
-    let mut material = materials.get_mut(&handle).unwrap();
-    match hex.0 {
-        HexStatus::Cold => {
-            material.base_color = Color::rgb(0.67, 0.67, 0.67);
-        }
-        HexStatus::Hot => {
-            material.base_color = Color::rgb(0.87, 0.87, 0.87);
-        }
-        HexStatus::Selected => {
-            material.base_color = Color::rgb(0.20, 0.90, 0.20);
-        }
-        HexStatus::Damage => {
-            material.base_color = Color::rgb(0.9, 0.1, 0.1);
-        }
-    }
-}
 //////////// RENET NETWORKING //////////////
 // Creates a RenetClient that is already connected to a server.
 // Returns an Err if connections fails
@@ -237,7 +215,6 @@ fn new_renet_client(username: &String) -> anyhow::Result<RenetClient> {
     let client = RenetClient::new(
         current_time,
         socket,
-        client_id,
         RenetConnectionConfig::default(),
         ClientAuthentication::Unsecure {
             client_id,
