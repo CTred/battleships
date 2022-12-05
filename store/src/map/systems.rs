@@ -1,10 +1,10 @@
 use super::{
-    components::{world_pos_to_coordinates, CubeCoords, SpawnHover},
+    components::{world_pos_to_coordinates, CubeCoords},
     Hex, HexHover, HexMapEntities, HexStatus, Hexagon, MouseCubePos, HEX_CONFIG_PADDING,
     HEX_CONFIG_SIZE, HEX_TOT_SIZE,
 };
-use crate::{camera::MouseWorldPos, ships::components::Ship};
-use bevy::{input::mouse::MouseWheel, prelude::*};
+use crate::{camera::MouseWorldPos, game_objects};
+use bevy::prelude::*;
 
 pub fn world_pos_to_cube_coords(
     ms_pos: Res<MouseWorldPos>,
@@ -36,7 +36,7 @@ pub fn update_hover_hex(
         Err(query_error) => match query_error {
             bevy::ecs::query::QuerySingleError::NoEntities(_) => {
                 commands
-                    .spawn_bundle(MaterialMeshBundle {
+                    .spawn(MaterialMeshBundle {
                         mesh: meshes.add(hex.to_mesh()),
                         material: materials.add(StandardMaterial {
                             base_color: Color::rgba(0.87, 0.87, 0.87, 0.5),
@@ -99,6 +99,7 @@ pub fn hex_activate(
     }
 }
 
+// TODO!: UPDATE DRAW_LINE FUNCTION TO BE EVENT DRIVEN, INSTEAD OF MOUSE INPUT
 pub fn hex_draw_line(
     ms_input: Res<Input<MouseButton>>,
     ms_coord: Res<MouseCubePos>,
@@ -107,32 +108,10 @@ pub fn hex_draw_line(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if ms_input.just_pressed(MouseButton::Right) {
-        let hex_origin = Hexagon::new(
-            HEX_CONFIG_SIZE,
-            HEX_CONFIG_PADDING,
-            Some(CubeCoords::ZERO),
-            0.0,
-        );
-        let hex_end = Hexagon::new(HEX_CONFIG_SIZE, HEX_CONFIG_PADDING, Some(ms_coord.0), 0.0);
-        let distance = ms_coord.0.magnitude(); // NOTE: distance to coord 0,0,0
-        let points: Vec<Vec3> = (0..=distance)
-            .map(|i| {
-                lerp(
-                    hex_origin.world_pos(),
-                    hex_end.world_pos(),
-                    i as f32 / (distance) as f32,
-                )
-            })
-            .collect();
-        let entities: Vec<Option<&Entity>> = points
+        let line_coords = game_objects::line_coords(CubeCoords::ZERO, ms_coord.0);
+        let entities: Vec<Option<&Entity>> = line_coords
             .into_iter()
-            .map(|pos| {
-                let coords = world_pos_to_coordinates(
-                    HEX_CONFIG_SIZE + HEX_CONFIG_PADDING,
-                    Vec2::new(pos.x, pos.y),
-                );
-                hex_board.0.get(&coords)
-            })
+            .map(|coords| hex_board.0.get(&coords))
             .collect();
         for opt_entity in entities {
             if let Some(entity) = opt_entity {

@@ -57,7 +57,7 @@ fn setup(
     for hex in &board_config.hexes {
         let hex_pos = hex.world_pos();
         let entity = commands
-            .spawn_bundle(MaterialMeshBundle {
+            .spawn(MaterialMeshBundle {
                 mesh: meshes.add(hex.to_mesh()),
                 material: materials.add(StandardMaterial {
                     base_color: Color::rgb(0.67, 0.67, 0.67),

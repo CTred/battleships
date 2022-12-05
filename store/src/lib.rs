@@ -1,14 +1,13 @@
+pub mod camera;
+pub mod game_objects;
+pub mod map;
+
 pub use bevy::prelude::*;
-use map::components::CubeCoords;
 use serde::{Deserialize, Serialize};
-use ships::ShipType;
 use std::collections::{HashMap, VecDeque};
 
-use crate::ships::SHIPS;
-
-pub mod camera;
-pub mod map;
-pub mod ships;
+use game_objects::{GameObject, SHIPS};
+use map::components::CubeCoords;
 
 /// Struct for storing player related data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,8 +41,9 @@ pub enum GameEvent {
     },
     ShipPlaced {
         player_id: PlayerId,
+        ship_type: GameObject,
         at: CubeCoords,
-        rotation: u32,
+        rotation: i32,
     },
 }
 
@@ -65,7 +65,7 @@ type PlayerId = u64;
 pub struct GameState {
     pub stage: GameStage,
     pub players: HashMap<PlayerId, Player>,
-    pub players_garage: HashMap<PlayerId, VecDeque<ShipType>>,
+    pub players_garage: HashMap<PlayerId, VecDeque<GameObject>>,
     pub history: Vec<GameEvent>,
     pub cur_player: Option<PlayerId>,
 }
@@ -121,6 +121,7 @@ impl GameState {
                 player_id,
                 at,
                 rotation,
+                ship_type,
             } => {
                 if self.stage != GameStage::PreGame {
                     return false;
@@ -135,6 +136,9 @@ impl GameState {
                         return false;
                     }
                 }
+                let ship_coords: Vec<CubeCoords> =
+                    game_objects::get_object_all_coords(&ship_type, *rotation, &at);
+                // TODO: if any coord is occupied by ship, validade == false
             }
         }
         true
@@ -173,8 +177,9 @@ impl GameState {
             }
             ShipPlaced {
                 player_id,
-                at: _,
-                rotation: _,
+                at,
+                rotation,
+                ship_type,
             } => {
                 let player_ships = self
                     .players_garage

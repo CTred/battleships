@@ -18,29 +18,32 @@ pub struct CubeCoords {
 }
 
 impl CubeCoords {
-    pub const Q: Self = Self { q: 1, r: 0, s: 0 };
-    pub const R: Self = Self { q: 0, r: 1, s: 0 };
-    pub const S: Self = Self { q: 0, r: 0, s: 1 };
     pub const ZERO: Self = Self { q: 0, r: 0, s: 0 };
 
-    pub fn rotate_right(&mut self) {
-        self.q = -self.r;
-        self.r = -self.s;
-        self.s = -self.q;
+    pub fn distance(&self, other: &CubeCoords) -> u32 {
+        let dist = *other - *self;
+        (dist.q.abs() + dist.r.abs() + dist.s.abs()) as u32 / 2
     }
+    pub fn magnitude(&self) -> u32 {
+        self.distance(&CubeCoords::ZERO)
+    }
+
     pub fn rotate_left(&mut self) {
         self.q = -self.s;
         self.r = -self.q;
         self.s = -self.r;
     }
 
-    pub fn distance(&self, other: &CubeCoords) -> u32 {
-        let dist = *other - *self;
-        (dist.q.abs() + dist.r.abs() + dist.s.abs()) as u32 / 2
+    pub fn rotate_right(&mut self) {
+        self.q = -self.r;
+        self.r = -self.s;
+        self.s = -self.q;
     }
 
-    pub fn magnitude(&self) -> u32 {
-        self.distance(&CubeCoords::ZERO)
+    pub fn scalar_mul(&mut self, scalar: i32) {
+        self.q *= scalar;
+        self.r *= scalar;
+        self.s *= scalar;
     }
 }
 
@@ -170,9 +173,9 @@ impl HexMap {
     pub fn new_from_axial(radius: i32, hex_size: f32, padding: f32) -> Self {
         let mut hexes = Vec::new();
         for q in -radius..=radius {
-            for s in -radius..=radius {
-                let r: i32 = -s - q;
-                if r.abs() > radius {
+            for r in -radius..=radius {
+                let s: i32 = -r - q;
+                if s.abs() > radius {
                     continue;
                 }
                 hexes.push(Hexagon::new(

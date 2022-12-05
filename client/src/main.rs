@@ -3,14 +3,12 @@ use bevy_renet::{run_if_client_connected, RenetClientPlugin};
 use renet::{
     ClientAuthentication, RenetClient, RenetConnectionConfig, RenetError, NETCODE_USER_DATA_BYTES,
 };
-use std::{iter::Enumerate, net::UdpSocket, time::SystemTime};
+use std::{net::UdpSocket, time::SystemTime};
 use store::{
-    camera::{CameraPlugin, MouseWorldPos},
-    map::{
-        components::{CubeCoords, Hexagon, MouseCubePos},
-        HexPlugin, HEX_CONFIG_PADDING, HEX_CONFIG_SIZE,
-    },
-    ships::Ship,
+    camera::CameraPlugin,
+    game_objects,
+    game_objects::{AngularRot, GameObject, GameObjectsPlugin, GridMaxRotation, MouseFollow},
+    map::{components::MouseCubePos, HexPlugin},
     GameEvent, GameState,
 };
 
@@ -48,6 +46,7 @@ fn main() {
     .add_system(input)
     .add_plugin(HexPlugin)
     .add_plugin(UiPlugin)
+    .add_plugin(GameObjectsPlugin)
     .add_system(update_board)
     .add_system_to_stage(
         CoreStage::PostUpdate,
@@ -71,47 +70,28 @@ fn spawns(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let hex = Hexagon::new(
-        HEX_CONFIG_SIZE,
-        HEX_CONFIG_PADDING,
-        Some(CubeCoords { q: 0, r: 0, s: 0 }),
-        1.0,
-    );
-
-    let mut ship = Ship::new(
-        store::ships::ShipType::Light,
-        1_u64,
-        CubeCoords { q: 0, r: 0, s: 0 },
-        CubeCoords { q: 0, r: -1, s: 1 },
-    );
-    let pos = ship.world_pos();
-    commands.spawn_bundle(MaterialMeshBundle {
-        mesh: meshes.add(ship.to_mesh()),
-        material: materials.add(StandardMaterial {
-            base_color: Color::GOLD,
+    commands.spawn((
+        MaterialMeshBundle {
+            mesh: meshes.add(game_objects::to_mesh(&GameObject::Ship)),
+            material: materials.add(StandardMaterial {
+                base_color: Color::GOLD,
+                ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.0, 2.0),
             ..default()
-        }),
-        transform: Transform::from_xyz(pos.x, pos.y, pos.z),
-        ..default()
-    });
-
-    let pos = ship.world_pos();
-    commands.spawn_bundle(MaterialMeshBundle {
-        mesh: meshes.add(ship.to_mesh()),
-        material: materials.add(StandardMaterial {
-            base_color: Color::GOLD,
-            ..default()
-        }),
-        transform: Transform::from_xyz(pos.x, pos.y, pos.z),
-        ..default()
-    });
+        },
+        MouseFollow,
+        GridMaxRotation(6 * 2),
+        AngularRot(0),
+        GameObject::Ship,
+    ));
 }
 
 /////////// UPDATE SYSTEMTS /////////////
 
 fn input(
     input: Res<Input<MouseButton>>,
-    kb_input: Res<Input<KeyCode>>,
+    // kb_input: Res<Input<KeyCode>>,
     ms_coord_pos: Res<MouseCubePos>,
     game_state: Res<GameState>,
     mut client: ResMut<RenetClient>,
@@ -120,14 +100,7 @@ fn input(
     if input.just_pressed(MouseButton::Left) {
         // We only want to handle inputs once we are ingame
         match game_state.stage {
-            store::GameStage::PreGame => {
-                let event = GameEvent::ShipPlaced {
-                    player_id: client.client_id(),
-                    at: ms_coord_pos.0,
-                    rotation: 3,
-                };
-                client.send_message(0, bincode::serialize(&event).unwrap());
-            }
+            store::GameStage::PreGame => {}
             store::GameStage::InGame => {
                 let event = GameEvent::ShipMove {
                     player_id: client.client_id(),
@@ -139,9 +112,6 @@ fn input(
                 return;
             }
         };
-    }
-    if kb_input.just_pressed(KeyCode::Space) {
-        info!("game_state: {:?}", game_state);
     }
 }
 
@@ -160,19 +130,9 @@ fn update_board(
             GameEvent::ShipPlaced {
                 player_id,
                 at,
-                rotation: _,
+                rotation,
+                ship_type,
             } => {
-                let ship = Ship::new(store::ships::ShipType::Light, 1_u64, *at, *at);
-                let pos = ship.world_pos();
-                commands.spawn_bundle(MaterialMeshBundle {
-                    mesh: meshes.add(ship.to_mesh()),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::GOLD,
-                        ..default()
-                    }),
-                    transform: Transform::from_xyz(pos.x, pos.y, pos.z),
-                    ..default()
-                });
                 info!("{:?} ship placed", at);
                 // place_ship(&mut commands, at);
             }
