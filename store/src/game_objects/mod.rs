@@ -1,7 +1,7 @@
 pub mod components;
 pub mod systems;
 
-use crate::map::components::world_pos_to_coordinates;
+use crate::{map::components::world_pos_to_coordinates, GameStage, GameState};
 use bevy::{
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
@@ -9,6 +9,7 @@ use bevy::{
 // use serde::{Deserialize, Serialize};
 
 pub use components::*;
+use renet::RenetClient;
 
 use crate::map::{
     components::{CubeCoords, Hexagon},
@@ -23,8 +24,64 @@ impl Plugin for GameObjectsPlugin {
         app.add_system(systems::object_mouse_rotate)
             .add_system(systems::object_mouse_follow)
             .add_system(systems::object_mouse_hover)
-            .add_system(systems::object_mouse_place);
+            .add_system(systems::object_mouse_place_send)
+            .add_system_set(SystemSet::on_update(GameStage::PreGame).with_system(place_ships));
     }
+}
+
+fn place_ships(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut game_state: ResMut<GameState>,
+    client: Res<RenetClient>,
+    query: Query<Entity, With<MouseFollow>>,
+) {
+    if query.is_empty() {
+        // let my_id = client.client_id();
+        // let my_garage = game_state
+        //     .players_garage
+        //     .get_mut(&my_id)
+        //     .expect("failed to get user garage");
+        // if let Some(ship) = my_garage.pop_front() {
+        let mut ship = spawn_object(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &GameObject::Ship,
+            0,
+            Transform::from_xyz(0.0, 0.0, 2.0),
+            Color::BLUE,
+        );
+        commands.entity(ship).insert(MouseFollow);
+        // }
+    }
+}
+
+/// Spawns an object to world.
+pub fn spawn_object(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    game_object: &GameObject,
+    angular_rot: i32,
+    transform: Transform,
+    base_color: Color,
+) -> Entity {
+    commands
+        .spawn((
+            ObjectBundle::new(game_object, angular_rot),
+            MaterialMeshBundle {
+                mesh: meshes.add(to_mesh(game_object)),
+                material: materials.add(StandardMaterial {
+                    base_color,
+                    ..default()
+                }),
+                transform,
+                ..default()
+            },
+        ))
+        .id()
 }
 
 /// Generate a ['MaterialMeshBundle'] based on Hexagon coordinates and game object type.
@@ -75,17 +132,29 @@ pub fn to_mesh(game_object: &GameObject) -> Mesh {
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vectors);
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 5]);
             mesh.set_indices(Some(Indices::U32(vec![0, 1, 3, 1, 2, 3, 0, 3, 4])));
-        } // ShipType::Medium => {}
-          // ShipType::Large => {}
+        }
+        GameObject::Cruizer => {
+            let bottom_left = [
+                -hex_dimensions.width / 4.0,
+                -hex_dimensions.height * 1.2 * 2.5,
+                0.0,
+            ];
+            let bottom_right = [
+                hex_dimensions.width / 4.0,
+                -hex_dimensions.height * 1.2 * 2.5,
+                0.0,
+            ];
+            vectors.push(upper_left);
+            vectors.push(bottom_left);
+            vectors.push(bottom_right);
+            vectors.push(upper_right);
+            vectors.push(triangle_top);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vectors);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 5]);
+            mesh.set_indices(Some(Indices::U32(vec![0, 1, 3, 1, 2, 3, 0, 3, 4])));
+        }
     }
     mesh
-}
-
-fn valid_rotations(game_object: &GameObject) -> u32 {
-    match game_object {
-        GameObject::Boat => 6,
-        GameObject::Ship => 6 * 2,
-    }
 }
 
 pub fn get_object_all_coords(
@@ -96,12 +165,14 @@ pub fn get_object_all_coords(
     match game_object {
         GameObject::Boat => {
             let end_cube = hex_end_rotate(rotation, 2);
-            dbg!(&end_cube);
             line_coords(*at, end_cube + *at)
         }
         GameObject::Ship => {
             let end_cube = hex_end_rotate(rotation, 3);
-            dbg!(&end_cube);
+            line_coords(*at, end_cube + *at)
+        }
+        GameObject::Cruizer => {
+            let end_cube = hex_end_rotate(rotation, 4);
             line_coords(*at, end_cube + *at)
         }
     }
@@ -122,20 +193,18 @@ fn hex_end_rotate(rotation: i32, object_len: u32) -> CubeCoords {
 }
 
 pub fn build_coordinate_vector(object_len: u32) -> Vec<i32> {
-    let vector_len = 6 * (object_len - 1);
-    let vec_max_value = object_len - 1;
+    let displacement = object_len - 1;
+    let vector_len = 6 * displacement;
     let mut first_counter: i32 = 0;
-    let mut second_counter = 0;
     let mut direction = 1;
     let mut coord_pos = Vec::with_capacity(vector_len as usize);
     while coord_pos.len() < vector_len as usize {
-        // dbg!(&first_counter);
-        if first_counter.abs() < object_len as i32 {
+        if first_counter.abs() < displacement as i32 {
             coord_pos.push(first_counter);
             first_counter += direction;
         }
-        if first_counter.abs() >= object_len as i32 {
-            if object_len % 2 != 0 {
+        if first_counter.abs() >= displacement as i32 {
+            for _ in 0..object_len {
                 coord_pos.push((object_len - 1) as i32 * direction);
             }
             direction *= -1;

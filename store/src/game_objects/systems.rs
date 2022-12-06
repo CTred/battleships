@@ -4,6 +4,7 @@ use std::f32::consts::PI;
 use bevy::{input::mouse::MouseWheel, prelude::*};
 
 use crate::{
+    game_objects::ObjectBundle,
     map::{
         self,
         components::{HexMapEntities, Hexagon, MouseCubePos},
@@ -43,7 +44,7 @@ pub fn object_mouse_rotate(
     }
 }
 
-pub fn object_mouse_place(
+pub fn object_mouse_place_send(
     mut query: Query<(&GameObject, &AngularRot), With<MouseFollow>>,
     ms_input: Res<Input<MouseButton>>,
     ms_pos: Res<MouseCubePos>,
@@ -58,6 +59,37 @@ pub fn object_mouse_place(
                 ship_type: game_object.clone(),
             };
             client.send_message(0, bincode::serialize(&event).unwrap());
+        }
+    }
+}
+
+pub fn object_mouse_place_consume(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut game_events: EventReader<GameEvent>,
+    query: Query<Entity, With<MouseFollow>>,
+) {
+    for ev in game_events.iter() {
+        use GameEvent::*;
+        match ev {
+            ShipPlaced {
+                player_id,
+                ship_type,
+                at,
+                rotation,
+            } => {
+                super::spawns(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    ship_type,
+                    *rotation,
+                    at.world_pos(),
+                    Color::ORANGE_RED,
+                );
+            }
+            _ => {}
         }
     }
 }

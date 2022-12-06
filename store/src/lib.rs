@@ -48,7 +48,7 @@ pub enum GameEvent {
 }
 
 /// The different states a game can be in. (not to be confused with the entire "GameState")
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum GameStage {
     Lobby,
     PreGame,
@@ -123,22 +123,26 @@ impl GameState {
                 rotation,
                 ship_type,
             } => {
-                if self.stage != GameStage::PreGame {
-                    return false;
-                }
-                match self.players_garage.get(player_id) {
-                    Some(garage) => {
-                        if garage.len() == 0 {
-                            return false;
-                        }
-                    }
-                    None => {
-                        return false;
-                    }
-                }
-                let ship_coords: Vec<CubeCoords> =
-                    game_objects::get_object_all_coords(&ship_type, *rotation, &at);
-                // TODO: if any coord is occupied by ship, validade == false
+                // TODO: check if game is in PreGame
+                // if self.stage != GameStage::PreGame {
+                //     return false;
+                // }
+
+                // TODO: check if there is this ship at players garage
+                // match self.players_garage.get(player_id) {
+                //     Some(garage) => {
+                //         if garage.len() == 0 {
+                //             return false;
+                //         }
+                //     }
+                //     None => {
+                //         return false;
+                //     }
+                // }
+
+                // TODO: check if all hexes are valid positions
+
+                // TODO: check if all hexes are unnocupied
             }
         }
         true
@@ -181,23 +185,28 @@ impl GameState {
                 rotation,
                 ship_type,
             } => {
-                let player_ships = self
-                    .players_garage
-                    .get_mut(player_id)
-                    .expect("expected garage");
+                // TODO: update HexMap with occupied hexes
 
-                player_ships
-                    .pop_front()
-                    .expect("expected ships available at garage");
+                // TODO: remove ship from garage
+                // let player_ships = self
+                //     .players_garage
+                //     .get_mut(player_id)
+                //     .expect("expected garage");
 
-                let mut ships_remainder = 0;
-                for player in self.players.keys() {
-                    ships_remainder += self.players_garage.get(player).unwrap().len();
-                }
-                trace!("ships to place: {:?}", ships_remainder);
-                if ships_remainder == 0 {
-                    self.stage = GameStage::InGame;
-                }
+                // player_ships
+                //     .pop_front()
+                //     .expect("expected ships available at garage");
+
+                // let mut ships_remainder = 0;
+                // for player in self.players.keys() {
+                //     ships_remainder += self.players_garage.get(player).unwrap().len();
+                // }
+                // trace!("ships to place: {:?}", ships_remainder);
+
+                // TODO: if both players have zero ships, start game
+                // if ships_remainder == 0 {
+                //     self.stage = GameStage::InGame;
+                // }
             }
         }
 

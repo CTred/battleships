@@ -6,10 +6,10 @@ use renet::{
 use std::{net::UdpSocket, time::SystemTime};
 use store::{
     camera::CameraPlugin,
-    game_objects,
+    game_objects::{self, ObjectBundle},
     game_objects::{AngularRot, GameObject, GameObjectsPlugin, GridMaxRotation, MouseFollow},
     map::{components::MouseCubePos, HexPlugin},
-    GameEvent, GameState,
+    GameEvent, GameStage, GameState,
 };
 
 use ui::UiPlugin;
@@ -42,7 +42,7 @@ fn main() {
     .insert_resource(GameState::default())
     .add_event::<GameEvent>()
     // my own code
-    .add_startup_system(spawns)
+    .add_state(GameStage::PreGame)
     .add_system(input)
     .add_plugin(HexPlugin)
     .add_plugin(UiPlugin)
@@ -65,27 +65,6 @@ fn main() {
 ////////// COMPONENTS /////////////
 
 ////////// SETUP /////////////
-fn spawns(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    commands.spawn((
-        MaterialMeshBundle {
-            mesh: meshes.add(game_objects::to_mesh(&GameObject::Ship)),
-            material: materials.add(StandardMaterial {
-                base_color: Color::GOLD,
-                ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 0.0, 2.0),
-            ..default()
-        },
-        MouseFollow,
-        GridMaxRotation(6 * 2),
-        AngularRot(0),
-        GameObject::Ship,
-    ));
-}
 
 /////////// UPDATE SYSTEMTS /////////////
 
@@ -140,20 +119,6 @@ fn update_board(
         }
     }
 }
-
-// fn place_ship(commands: &mut Commands, at: CubeCoords) {
-//     let mut ship = Ship::new(store::ships::ShipType::Light, 1_u64, Some(at), &hex);
-//     let pos = ship.world_pos();
-//     commands.spawn_bundle(MaterialMeshBundle {
-//         mesh: meshes.add(ship.to_mesh()),
-//         material: materials.add(StandardMaterial {
-//             base_color: Color::RED,
-//             ..default()
-//         }),
-//         transform: Transform::from_xyz(pos.x, pos.y, pos.z),
-//         ..default()
-//     });
-// }
 
 //////////// RENET NETWORKING //////////////
 // Creates a RenetClient that is already connected to a server.
