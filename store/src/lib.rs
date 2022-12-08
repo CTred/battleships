@@ -15,6 +15,9 @@ pub struct Player {
     pub name: String,
 }
 
+#[derive(Resource)]
+pub struct WhoAmI(pub PlayerId);
+
 /// An event that progresses the GameState forward
 #[derive(Debug, Clone, Serialize, PartialEq, Deserialize)]
 pub enum GameEvent {

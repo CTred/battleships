@@ -155,7 +155,10 @@ impl Hexagon {
 }
 
 #[derive(Debug, Default, Resource)]
-pub struct HexMapEntities(pub HashMap<CubeCoords, Entity>);
+pub struct HexMapTiles(pub HashMap<CubeCoords, Entity>);
+
+#[derive(Debug, Default, Resource)]
+pub struct HexMapObjects(pub HashMap<CubeCoords, Entity>);
 
 #[derive(Debug, Component)]
 pub struct HexHover;

@@ -9,7 +9,7 @@ use store::{
     game_objects::{self, ObjectBundle},
     game_objects::{AngularRot, GameObject, GameObjectsPlugin, GridMaxRotation, MouseFollow},
     map::{components::MouseCubePos, HexPlugin},
-    GameEvent, GameStage, GameState,
+    GameEvent, GameStage, GameState, WhoAmI,
 };
 
 use ui::UiPlugin;
@@ -42,6 +42,7 @@ fn main() {
     .insert_resource(GameState::default())
     .add_event::<GameEvent>()
     // my own code
+    .add_startup_system(setup)
     .add_state(GameStage::PreGame)
     .add_system(input)
     .add_plugin(HexPlugin)
@@ -65,6 +66,9 @@ fn main() {
 ////////// COMPONENTS /////////////
 
 ////////// SETUP /////////////
+fn setup(mut commands: Commands, client: Res<RenetClient>) {
+    commands.insert_resource(WhoAmI(client.client_id()));
+}
 
 /////////// UPDATE SYSTEMTS /////////////
 

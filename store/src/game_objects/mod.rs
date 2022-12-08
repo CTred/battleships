@@ -1,7 +1,7 @@
 pub mod components;
 pub mod systems;
 
-use crate::{map::components::world_pos_to_coordinates, GameStage, GameState};
+use crate::{map::components::world_pos_to_coordinates, GameStage, GameState, PlayerId, WhoAmI};
 use bevy::{
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
@@ -25,6 +25,7 @@ impl Plugin for GameObjectsPlugin {
             .add_system(systems::object_mouse_follow)
             .add_system(systems::object_mouse_hover)
             .add_system(systems::object_mouse_place_send)
+            .add_system(systems::object_mouse_place_consume)
             .add_system_set(SystemSet::on_update(GameStage::PreGame).with_system(place_ships));
     }
 }
@@ -34,6 +35,7 @@ fn place_ships(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut game_state: ResMut<GameState>,
+    who_am_i: Res<WhoAmI>,
     client: Res<RenetClient>,
     query: Query<Entity, With<MouseFollow>>,
 ) {
@@ -48,6 +50,7 @@ fn place_ships(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &who_am_i.0,
             &GameObject::Ship,
             0,
             Transform::from_xyz(0.0, 0.0, 2.0),
@@ -63,6 +66,7 @@ pub fn spawn_object(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    player_id: &PlayerId,
     game_object: &GameObject,
     angular_rot: i32,
     transform: Transform,
@@ -157,6 +161,13 @@ pub fn to_mesh(game_object: &GameObject) -> Mesh {
     mesh
 }
 
+pub fn get_max_grid_rotation(game_object: &GameObject) -> i32 {
+    match game_object {
+        GameObject::Boat => 6 * 1,
+        GameObject::Ship => 6 * 2,
+        GameObject::Cruizer => 6 * 3,
+    }
+}
 pub fn get_object_all_coords(
     game_object: &GameObject,
     rotation: i32,

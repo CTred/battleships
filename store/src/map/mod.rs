@@ -30,7 +30,9 @@ const CUBE_DIAGONALS: [CubeCoords; 6] = [
 pub struct HexPlugin;
 impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(HexMapEntities::default())
+        app.insert_resource(HexMapTiles::default())
+            .insert_resource(HexMapObjects::default())
+            // TODO: CHECK IF HEXMAP RESOURCE IS ACTUALLY NECESSARY.
             .insert_resource(HexMap::new_from_axial(8, 1.0, 0.1))
             .insert_resource(MouseCubePos::default())
             // TODO: MOUSE CUBE POS NEED TO BE UPDATED FIRST
@@ -40,6 +42,14 @@ impl Plugin for HexPlugin {
             .add_system(hex_draw_line)
             .add_startup_system(setup);
     }
+
+    fn name(&self) -> &str {
+        std::any::type_name::<Self>()
+    }
+
+    fn is_unique(&self) -> bool {
+        true
+    }
 }
 
 fn setup(
@@ -47,7 +57,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     board_config: Res<HexMap>,
-    mut board_entities: ResMut<HexMapEntities>,
+    mut board_entities: ResMut<HexMapTiles>,
 ) {
     // Spawn board background
 

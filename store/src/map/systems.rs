@@ -1,6 +1,6 @@
 use super::{
     components::{world_pos_to_coordinates, CubeCoords},
-    Hex, HexHover, HexMapEntities, HexStatus, Hexagon, MouseCubePos, HEX_CONFIG_PADDING,
+    Hex, HexHover, HexMapTiles, HexStatus, Hexagon, MouseCubePos, HEX_CONFIG_PADDING,
     HEX_CONFIG_SIZE, HEX_TOT_SIZE,
 };
 use crate::{camera::MouseWorldPos, game_objects};
@@ -18,7 +18,7 @@ pub fn update_hover_hex(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     ms_coord: Res<MouseCubePos>,
-    hex_board: Res<HexMapEntities>,
+    hex_board: Res<HexMapTiles>,
     mut query: Query<(&mut Transform, &mut Visibility), With<HexHover>>,
 ) {
     let is_entity = match hex_board.0.get(&ms_coord.0) {
@@ -85,7 +85,7 @@ pub fn update_hover_hex(
 pub fn hex_activate(
     ms_input: Res<Input<MouseButton>>,
     ms_coord: Res<MouseCubePos>,
-    hex_board: Res<HexMapEntities>,
+    hex_board: Res<HexMapTiles>,
     mut query: Query<(&mut Hex, &Handle<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -103,7 +103,7 @@ pub fn hex_activate(
 pub fn hex_draw_line(
     ms_input: Res<Input<MouseButton>>,
     ms_coord: Res<MouseCubePos>,
-    hex_board: Res<HexMapEntities>,
+    hex_board: Res<HexMapTiles>,
     mut query: Query<(&mut Hex, &Handle<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {

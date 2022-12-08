@@ -4,13 +4,12 @@ use std::f32::consts::PI;
 use bevy::{input::mouse::MouseWheel, prelude::*};
 
 use crate::{
-    game_objects::ObjectBundle,
     map::{
         self,
-        components::{HexMapEntities, Hexagon, MouseCubePos},
+        components::{HexMapObjects, HexMapTiles, Hexagon, MouseCubePos},
         HEX_CONFIG_PADDING, HEX_CONFIG_SIZE,
     },
-    GameEvent,
+    GameEvent, WhoAmI,
 };
 
 use super::{AngularRot, GameObject, GridMaxRotation, MouseFollow, ObjectHover};
@@ -64,11 +63,16 @@ pub fn object_mouse_place_send(
 }
 
 pub fn object_mouse_place_consume(
+    // listen to valid game_events
+    mut game_events: EventReader<GameEvent>,
+    who_am_i: Res<WhoAmI>,
+    // spawn object
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut game_events: EventReader<GameEvent>,
     query: Query<Entity, With<MouseFollow>>,
+    // update HexMap with occupied hexes
+    mut hex_objects: ResMut<HexMapObjects>,
 ) {
     for ev in game_events.iter() {
         use GameEvent::*;
@@ -79,15 +83,38 @@ pub fn object_mouse_place_consume(
                 at,
                 rotation,
             } => {
-                super::spawns(
+                // remove mouse_follow entity if player_id == ME
+                if player_id == &who_am_i.0 {
+                    for entity in &query {
+                        commands.entity(entity).despawn_recursive();
+                    }
+                }
+
+                // place object
+                let hex = Hexagon::new(HEX_CONFIG_SIZE, HEX_CONFIG_PADDING, Some(*at), 2.0);
+                let hex_pos = hex.world_pos();
+                let mut transform = Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z);
+                let grid_max_rot = super::get_max_grid_rotation(ship_type);
+                transform.rotate_local_z(*rotation as f32 * PI * 2.0 / grid_max_rot as f32);
+                let entity = super::spawn_object(
                     &mut commands,
                     &mut meshes,
                     &mut materials,
+                    player_id,
                     ship_type,
                     *rotation,
-                    at.world_pos(),
+                    transform,
                     Color::ORANGE_RED,
                 );
+
+                // update hex_object dictionary
+                let all_coordinates = super::get_object_all_coords(ship_type, *rotation, at);
+                for coord in all_coordinates {
+                    let result = hex_objects.0.insert(coord, entity);
+                    if let Some(_) = result {
+                        error!("placed object on top of pre-existing one");
+                    }
+                }
             }
             _ => {}
         }
@@ -95,7 +122,8 @@ pub fn object_mouse_place_consume(
 }
 
 pub fn object_mouse_hover(
-    hex_board: Res<HexMapEntities>,
+    hex_board: Res<HexMapTiles>,
+    hex_objects: Res<HexMapObjects>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -110,6 +138,17 @@ pub fn object_mouse_hover(
         if kb_input.just_pressed(KeyCode::Space) {
             dbg!(&coords.last().unwrap());
         }
+        // check if updated object position collides with previously placed objects
+        let collision = coords.iter().find(|coord| {
+            if let Some(_) = hex_objects.0.get(coord) {
+                return true;
+            }
+            false
+        });
+        let hex_color = match collision {
+            Some(_) => Color::ORANGE_RED,
+            None => Color::GREEN,
+        };
 
         // check if there is any spawned hex that no longer matches the curr position and despawn
         let mut prev_coords = Vec::new();
@@ -141,7 +180,7 @@ pub fn object_mouse_hover(
                     .spawn(MaterialMeshBundle {
                         mesh: meshes.add(hex.to_mesh()),
                         material: materials.add(StandardMaterial {
-                            base_color: Color::rgba(0.87, 0.57, 0.57, 0.8),
+                            base_color: hex_color,
                             unlit: true,
                             alpha_mode: AlphaMode::Blend,
                             ..default()
