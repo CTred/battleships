@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use renet::RenetClient;
 use std::f32::consts::PI;
 
@@ -58,6 +59,16 @@ pub fn object_mouse_place_send(
                 ship_type: game_object.clone(),
             };
             client.send_message(0, bincode::serialize(&event).unwrap());
+
+            // TODO! If garage == 0, attempt game start.
+            // BUG! BeginGame event must be fired only once.
+            // if there are none, attempt game start
+            None => {
+                let event = GameEvent::BeginGame {
+                    first_player: who_am_i.0,
+                };
+                client.send_message(0, bincode::serialize(&event).unwrap());
+            }
         }
     }
 }
@@ -139,60 +150,43 @@ pub fn object_mouse_hover(
             dbg!(&coords.last().unwrap());
         }
         // check if updated object position collides with previously placed objects
-        let collision = coords.iter().find(|coord| {
-            if let Some(_) = hex_objects.0.get(coord) {
-                return true;
-            }
-            false
-        });
+        let collision = coords
+            .iter()
+            .any(|coord| hex_objects.0.get(coord).is_some());
         let hex_color = match collision {
-            Some(_) => Color::ORANGE_RED,
-            None => Color::GREEN,
+            true => Color::ORANGE_RED,
+            false => Color::GREEN,
         };
 
-        // check if there is any spawned hex that no longer matches the curr position and despawn
-        let mut prev_coords = Vec::new();
-        for (e, transf) in &hex_query {
-            let coord = map::components::world_pos_to_coordinates(
-                HEX_CONFIG_SIZE + HEX_CONFIG_PADDING,
-                Vec2 {
-                    x: transf.translation.x,
-                    y: transf.translation.y,
-                },
-            );
-            prev_coords.push(coord);
-            if !coords.iter().any(|c| c == &coord) {
-                commands.entity(e).despawn_recursive();
-            }
+        // despawn hexes of prev. frame
+        for (e, _) in &hex_query {
+            commands.entity(e).despawn_recursive();
         }
-
-        // check if there is any coordinate missing a hex hover to spawn
+        // respawn with curr position
         for coord in coords.iter() {
             // TODO: implement proper layering system;
-            if !prev_coords.iter().any(|c| c == coord) {
-                let is_entity = match hex_board.0.get(&coord) {
-                    Some(_) => true,
-                    None => false,
-                };
-                let hex = Hexagon::new(HEX_CONFIG_SIZE, HEX_CONFIG_PADDING, Some(*coord), 1.1);
-                let hex_pos = hex.world_pos();
-                commands
-                    .spawn(MaterialMeshBundle {
-                        mesh: meshes.add(hex.to_mesh()),
-                        material: materials.add(StandardMaterial {
-                            base_color: hex_color,
-                            unlit: true,
-                            alpha_mode: AlphaMode::Blend,
-                            ..default()
-                        }),
-                        transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
-                        visibility: Visibility {
-                            is_visible: is_entity,
-                        },
+            let is_entity = match hex_board.0.get(&coord) {
+                Some(_) => true,
+                None => false,
+            };
+            let hex = Hexagon::new(HEX_CONFIG_SIZE, HEX_CONFIG_PADDING, Some(*coord), 1.1);
+            let hex_pos = hex.world_pos();
+            commands
+                .spawn(MaterialMeshBundle {
+                    mesh: meshes.add(hex.to_mesh()),
+                    material: materials.add(StandardMaterial {
+                        base_color: hex_color,
+                        unlit: true,
+                        alpha_mode: AlphaMode::Blend,
                         ..default()
-                    })
-                    .insert(ObjectHover);
-            }
+                    }),
+                    transform: Transform::from_xyz(hex_pos.x, hex_pos.y, hex_pos.z),
+                    visibility: Visibility {
+                        is_visible: is_entity,
+                    },
+                    ..default()
+                })
+                .insert(ObjectHover);
         }
     }
 }

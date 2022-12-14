@@ -6,8 +6,7 @@ use renet::{
 use std::{net::UdpSocket, time::SystemTime};
 use store::{
     camera::CameraPlugin,
-    game_objects::{self, ObjectBundle},
-    game_objects::{AngularRot, GameObject, GameObjectsPlugin, GridMaxRotation, MouseFollow},
+    game_objects::GameObjectsPlugin,
     map::{components::MouseCubePos, HexPlugin},
     GameEvent, GameStage, GameState, WhoAmI,
 };
@@ -43,7 +42,7 @@ fn main() {
     .add_event::<GameEvent>()
     // my own code
     .add_startup_system(setup)
-    .add_state(GameStage::PreGame)
+    .add_state(GameStage::Lobby)
     .add_system(input)
     .add_plugin(HexPlugin)
     .add_plugin(UiPlugin)
@@ -98,28 +97,23 @@ fn input(
     }
 }
 
-fn update_board(
-    mut commands: Commands,
-    game_state: Res<GameState>,
-    mut game_events: EventReader<GameEvent>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn update_board(mut game_stage: ResMut<State<GameStage>>, mut game_events: EventReader<GameEvent>) {
     for event in game_events.iter() {
         match event {
             GameEvent::ShipMove { player_id, at } => {
                 info!("{:?} moved to {:?}", player_id, at);
             }
-            GameEvent::ShipPlaced {
-                player_id,
-                at,
-                rotation,
-                ship_type,
-            } => {
-                info!("{:?} ship placed", at);
-                // place_ship(&mut commands, at);
+            GameEvent::ShipPlaced { .. } => {}
+            GameEvent::BeginGame { .. } => {
+                info!("GAME STARTED!");
+                game_stage.set(GameStage::InGame).unwrap();
             }
-            _ => {}
+            GameEvent::EndGame { .. } => todo!(),
+            GameEvent::PlayerJoined { .. } => {}
+            GameEvent::PlayerDisconnected { .. } => todo!(),
+            GameEvent::SetupBoard => {
+                game_stage.set(GameStage::PreGame).unwrap();
+            }
         }
     }
 }

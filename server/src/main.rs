@@ -76,10 +76,10 @@ fn main() {
                     // TODO: implement "start button in lobby"
                     // TODO: players may join in the middle of a game
                     if game_state.players.len() == 2 {
-                        let event = store::GameEvent::BeginGame { first_player: id };
+                        let event = store::GameEvent::SetupBoard;
                         game_state.consume(&event);
                         server.broadcast_message(0, bincode::serialize(&event).unwrap());
-                        trace!("The game has begun");
+                        trace!("Player setup ship positions");
                     }
                 }
                 ServerEvent::ClientDisconnected(id) => {

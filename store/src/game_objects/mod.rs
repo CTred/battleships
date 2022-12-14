@@ -1,7 +1,9 @@
 pub mod components;
 pub mod systems;
 
-use crate::{map::components::world_pos_to_coordinates, GameStage, GameState, PlayerId, WhoAmI};
+use crate::{
+    map::components::world_pos_to_coordinates, GameEvent, GameStage, GameState, PlayerId, WhoAmI,
+};
 use bevy::{
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
@@ -16,7 +18,15 @@ use crate::map::{
     HEX_CONFIG_PADDING, HEX_CONFIG_SIZE,
 };
 
-pub const SHIPS: [GameObject; 2] = [GameObject::Boat, GameObject::Ship];
+pub const SHIPS: [GameObject; 4] = [
+    GameObject::Cruizer,
+    GameObject::Ship,
+    GameObject::Boat,
+    GameObject::Boat,
+];
+
+#[derive(Resource)]
+pub struct Garage(pub Vec<GameObject>);
 
 pub struct GameObjectsPlugin;
 impl Plugin for GameObjectsPlugin {
@@ -26,38 +36,46 @@ impl Plugin for GameObjectsPlugin {
             .add_system(systems::object_mouse_hover)
             .add_system(systems::object_mouse_place_send)
             .add_system(systems::object_mouse_place_consume)
+            .add_system_set(SystemSet::on_enter(GameStage::PreGame).with_system(populate_garage))
             .add_system_set(SystemSet::on_update(GameStage::PreGame).with_system(place_ships));
     }
+}
+
+fn populate_garage(mut commands: Commands) {
+    let mut garage = Vec::new();
+    for s in SHIPS {
+        garage.push(s);
+    }
+    commands.insert_resource(Garage(garage));
 }
 
 fn place_ships(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut game_state: ResMut<GameState>,
+    mut garage: ResMut<Garage>,
     who_am_i: Res<WhoAmI>,
-    client: Res<RenetClient>,
     query: Query<Entity, With<MouseFollow>>,
+    mut client: ResMut<RenetClient>,
 ) {
     if query.is_empty() {
-        // let my_id = client.client_id();
-        // let my_garage = game_state
-        //     .players_garage
-        //     .get_mut(&my_id)
-        //     .expect("failed to get user garage");
-        // if let Some(ship) = my_garage.pop_front() {
-        let mut ship = spawn_object(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &who_am_i.0,
-            &GameObject::Ship,
-            0,
-            Transform::from_xyz(0.0, 0.0, 2.0),
-            Color::BLUE,
-        );
-        commands.entity(ship).insert(MouseFollow);
-        // }
+        let obj_from_garage = garage.0.pop();
+        match obj_from_garage {
+            // if there are ships to place
+            Some(obj) => {
+                let ship = spawn_object(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &who_am_i.0,
+                    &obj,
+                    0,
+                    Transform::from_xyz(0.0, 0.0, 2.0),
+                    Color::BLUE,
+                );
+                commands.entity(ship).insert(MouseFollow);
+            }
+        }
     }
 }
 

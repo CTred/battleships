@@ -4,7 +4,7 @@ pub mod map;
 
 pub use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use game_objects::{GameObject, SHIPS};
 use map::components::CubeCoords;
@@ -21,6 +21,7 @@ pub struct WhoAmI(pub PlayerId);
 /// An event that progresses the GameState forward
 #[derive(Debug, Clone, Serialize, PartialEq, Deserialize)]
 pub enum GameEvent {
+    SetupBoard,
     BeginGame {
         first_player: PlayerId,
     },
@@ -68,7 +69,7 @@ type PlayerId = u64;
 pub struct GameState {
     pub stage: GameStage,
     pub players: HashMap<PlayerId, Player>,
-    pub players_garage: HashMap<PlayerId, VecDeque<GameObject>>,
+    pub player_ships: HashMap<PlayerId, Vec<(GameObject, CubeCoords, i32)>>,
     pub history: Vec<GameEvent>,
     pub cur_player: Option<PlayerId>,
 }
@@ -78,7 +79,7 @@ impl Default for GameState {
         Self {
             stage: GameStage::Lobby,
             players: HashMap::new(),
-            players_garage: HashMap::new(),
+            player_ships: HashMap::new(),
             history: Vec::new(),
             cur_player: None,
         }
@@ -95,6 +96,13 @@ impl GameState {
                     return false;
                 }
                 if self.players.len() != 2 {
+                    return false;
+                }
+                if self
+                    .player_ships
+                    .iter()
+                    .any(|(_, vec)| vec.len() < SHIPS.len())
+                {
                     return false;
                 }
             }
@@ -120,32 +128,34 @@ impl GameState {
                 }
             }
             ShipMove { player_id, at: _ } => return self.is_player_turn(player_id),
-            ShipPlaced {
-                player_id,
-                at,
-                rotation,
-                ship_type,
-            } => {
-                // TODO: check if game is in PreGame
-                // if self.stage != GameStage::PreGame {
-                //     return false;
-                // }
+            ShipPlaced { player_id, .. } => {
+                // check if game is in PreGame
+                if self.stage != GameStage::PreGame {
+                    return false;
+                }
 
-                // TODO: check if there is this ship at players garage
-                // match self.players_garage.get(player_id) {
-                //     Some(garage) => {
-                //         if garage.len() == 0 {
-                //             return false;
-                //         }
-                //     }
-                //     None => {
-                //         return false;
-                //     }
-                // }
-
-                // TODO: check if all hexes are valid positions
-
-                // TODO: check if all hexes are unnocupied
+                // check if player is still allowed to place ships
+                match self.player_ships.get(player_id) {
+                    Some(garage) => {
+                        if garage.len() == SHIPS.len() {
+                            return false;
+                        }
+                        if garage.len() > SHIPS.len() {
+                            panic!("{:?} has placed more ships than allowed", player_id);
+                        }
+                    }
+                    None => {
+                        return false;
+                    }
+                }
+            }
+            SetupBoard => {
+                if self.stage != GameStage::Lobby {
+                    return false;
+                }
+                if self.players.len() != 2 {
+                    return false;
+                }
             }
         }
         true
@@ -155,16 +165,15 @@ impl GameState {
         use GameEvent::*;
         match valid_event {
             BeginGame { first_player } => {
-                self.cur_player = Some(*first_player);
-                trace!("First player: {:?}", *first_player);
-                for player in self.players.keys() {
-                    let mut deque = VecDeque::new();
-                    for ship in SHIPS {
-                        deque.push_back(ship);
-                    }
-                    self.players_garage.insert(*player, deque);
-                }
-                self.stage = GameStage::PreGame;
+                let player = self
+                    .players
+                    .iter()
+                    .filter(|(p, _)| *p != first_player)
+                    .next()
+                    .unwrap();
+                self.cur_player = Some(*player.0);
+                trace!("First player: {:?}", *player.0);
+                self.stage = GameStage::InGame;
             }
             EndGame { reason: _ } => self.stage = GameStage::Ended,
             PlayerDisconnected { player_id } => {
@@ -188,28 +197,14 @@ impl GameState {
                 rotation,
                 ship_type,
             } => {
-                // TODO: update HexMap with occupied hexes
-
-                // TODO: remove ship from garage
-                // let player_ships = self
-                //     .players_garage
-                //     .get_mut(player_id)
-                //     .expect("expected garage");
-
-                // player_ships
-                //     .pop_front()
-                //     .expect("expected ships available at garage");
-
-                // let mut ships_remainder = 0;
-                // for player in self.players.keys() {
-                //     ships_remainder += self.players_garage.get(player).unwrap().len();
-                // }
-                // trace!("ships to place: {:?}", ships_remainder);
-
-                // TODO: if both players have zero ships, start game
-                // if ships_remainder == 0 {
-                //     self.stage = GameStage::InGame;
-                // }
+                let ship_vec = self.player_ships.get_mut(&player_id).unwrap();
+                ship_vec.push((*ship_type, *at, *rotation));
+            }
+            SetupBoard => {
+                self.stage = GameStage::PreGame;
+                for p in &self.players {
+                    self.player_ships.insert(*p.0, Vec::new());
+                }
             }
         }
 

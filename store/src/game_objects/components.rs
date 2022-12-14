@@ -13,7 +13,7 @@ pub struct GridMaxRotation(pub u8);
 #[derive(Component)]
 pub struct AngularRot(pub i32);
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Component)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Component)]
 pub enum GameObject {
     Boat,
     Ship,
